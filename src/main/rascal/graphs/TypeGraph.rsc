@@ -1,5 +1,6 @@
 module graphs::TypeGraph
 
+import IO;
 import Set;
 import String;
 
@@ -32,111 +33,109 @@ private set[loc] getCompilationUnitTypes(loc element, M3 model) {
     }
 }
 
+data TypeGraphAnnotation
+    = \nameClass(str nameClass)
+    | \modifier(Modifier modifier)
+    | \inProjectDecl(str scheme)
+    | \externalDecl(loc location)
+    ;
+
 data TypeGraphEdge
     = \extends()
     | \implements()
     | \invokes()
     | \dependsOn()
     | \contains()
-    | \annotates()
-    | \modifies()
+    | \annotated(TypeGraphAnnotation annotation)
     ;
 
-data TypeGraphAnnotation
-    = nameClass(str)
-    ;
+alias TypeGraph = LGraph[loc, TypeGraphEdge];
 
-data TypeGraphNode
-    = \element(loc)
-    | \modifier(Modifier)
-    | \annotation(TypeGraphAnnotation)
-    ;
+alias Annotate = set[TypeGraphAnnotation] (loc);
 
-data TypeGraphNodeLabel
-    = \projectElementLabel(str scheme)
-    | \externalElementLabel(loc location)
-    | \modifierLabel(Modifier)
-    | \annotationLabel(TypeGraphAnnotation)
-    ;
-
-TypeGraphNodeLabel labelTypeGraphNode(M3 model, TypeGraphNode \node) {
-    switch(\node) {
-        case \element(loc element): {
-            if (isNameDeclaredInProject(element, model)) {
-                return \projectElementLabel(element.scheme);
-            } else {
-                return \externalElementLabel(element);
-            }
-        }
-        case \modifier(Modifier modifier):
-            return \modifierLabel(modifier);
-        case \annotation(TypeGraphAnnotation annotation):
-            return \annotationLabel(annotation);
-    }
-    throw "Unreachable.";
-}
-
-alias TypeGraph = LGraph[TypeGraphNode, TypeGraphEdge];
-
-alias Annotate = set[TypeGraphAnnotation] (TypeGraphNode);
-
-set[TypeGraphAnnotation] noAnnotations(TypeGraphNode _) {
+set[TypeGraphAnnotation] annotateNone(loc _) {
     return {};
 }
 
-Annotate combineAnnotate(Annotate a, Annotate b) {
-    return set[TypeGraphAnnotation] (TypeGraphNode \node) {
-        return a(\node) + b(\node);
+Annotate combine(set[Annotate] annotates) {
+    return set[TypeGraphAnnotation] (loc \node) {
+        return union({ a(\node) | a <- annotates });
     };
 }
 
-Annotate annotateNameClass(rel[str, str] nameClasses, M3 model) {
-    rel[loc, str] elementNames = model.names<qualifiedName, simpleName>;
-    return set[TypeGraphAnnotation] (TypeGraphNode \node) {
-        switch(\node) {
-            case \element(loc element): {
-                if (isNameDeclaredInProject(element, model)) {
-                    return { \nameClass(c) | <namePart, c> <- nameClasses, name <- elementNames[element], contains(name, namePart) };
-                };
-            }
+Annotate annotateInProjectDecls(M3 model) {
+    return set[TypeGraphAnnotation] (loc \node) {
+        if (isNameDeclaredInProject(\node, model)) {
+            return { \inProjectDecl(\node.scheme) };
+        };
+        return {};
+    };
+}
+
+Annotate annotateExternalDecls(M3 model) {
+    return set[TypeGraphAnnotation] (loc \node) {
+        if (!isNameDeclaredInProject(\node, model)) {
+            return { \externalDecl(\node) };
         }
         return {};
     };
 }
 
-TypeGraph createTypeGraph(M3 model, Annotate annotate = noAnnotations, bool incudeCompilationUnitAsTypes = false) {
+Annotate annotateModifiers(M3 model) {
+    return set[TypeGraphAnnotation] (loc \node) {
+        return { \modifier(m) | <\node, m> <- model.modifiers };
+    };
+}
+
+Annotate annotateNameClass(rel[str, str] nameClasses, M3 model) {
+    rel[loc, str] elementNames = model.names<qualifiedName, simpleName>;
+    return set[TypeGraphAnnotation] (loc \node) {
+        if (isNameDeclaredInProject(\node, model)) {
+            return { \nameClass(c) | <namePart, c> <- nameClasses, name <- elementNames[\node], contains(name, namePart) };
+        }
+        return {};
+    };
+}
+
+Annotate annotateDefaults(M3 model, rel[str, str] nameClasses) {
+    return combine({ 
+        annotateInProjectDecls(model), 
+        annotateExternalDecls(model), 
+        annotateModifiers(model), 
+        annotateNameClass(nameClasses, model) 
+    });
+}
+
+TypeGraph createTypeGraph(M3 model, Annotate annotate, bool incudeCompilationUnitAsTypes = false) {
     // Extending classes and implementing interfaces
-    TypeGraph g = { <\element(from), \extends(), \element(to)> | <from, to> <- model.extends };
-    g += { <\element(from), \implements(), \element(to)> | <from, to> <- model.implements };
+    TypeGraph g = { <from, \extends(), to> | <from, to> <- model.extends };
+    g += { <from, \implements(), to> | <from, to> <- model.implements };
 
     // All containment relations between M3 elements
-    g += { <\element(from), \contains(), \element(to)> | <from, to> <- model.containment };
+    g += { <from, \contains(), to> | <from, to> <- model.containment };
 
     // Type dependency is the reference to a type by a certain element, but we
     // want to exclude the extends and implements relations, which we already
     // covered explicitly. Type dependencies are added transitively for all
     // types containing the type that has a dependency.
     rel[loc, loc] otherTypeDependency = model.typeDependency - model.extends - model.implements;
-    g += { <\element(fromAll), \dependsOn(), \element(to)> | <from, to> <- otherTypeDependency, fromAll <- getContainingElements(from, model) };
+    g += { <fromAll, \dependsOn(), to> | <from, to> <- otherTypeDependency, fromAll <- getContainingElements(from, model) };
 
     // Imports are part of the compilation unit and not the type. If we want to
     // include these as dependencies for the types inside that compilation unit,
     // we can add them here.
     if (incudeCompilationUnitAsTypes) {
-        g += { <\element(fromType), \dependsOn(), \element(to)> | <from, to> <- model.typeDependency, fromType <- getCompilationUnitTypes(from, model) };
+        g += { <fromType, \dependsOn(), to> | <from, to> <- model.typeDependency, fromType <- getCompilationUnitTypes(from, model) };
     }
 
     // Method invocations, from methods to methods,
-    g += { <\element(from), \invokes(), \element(to)> | <from, to> <- model.methodInvocation };
+    g += { <from, \invokes(), to> | <from, to> <- model.methodInvocation };
     // and copy to all containing types, to still cover general invocation
     // structure even if methods are split up differently.
-    g += { <\element(fromAll), \invokes(), \element(to)> | <from, to> <- model.methodInvocation, fromAll <- getContainingTypes(from, model) };
-
-    // Modifiers
-    g += { <\modifier(m), \modifies(), \element(d)> | <d, m> <- model.modifiers };
+    g += { <fromAll, \invokes(), to> | <from, to> <- model.methodInvocation, fromAll <- getContainingTypes(from, model) };
 
     // Annotate the graph using the annotation function
-    g += { <\annotation(a), \annotates(), \node> | \node <- (g<from> + g<to>), a <- annotate(\node) };
+    g += { <\node, \annotated(a), \node> | \node <- (g<from> + g<to>), a <- annotate(\node) };
 
     return g;
 }

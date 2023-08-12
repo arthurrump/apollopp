@@ -42,7 +42,3 @@ list[TypeGraph] getProjectTypeGraphs(loc dir) {
     }
     return result;
 }
-
-tuple[str spmfGraphList, map[TypeGraphEdge, int] mapping] getSpmfTypeGraphList(loc dir) {
-    return writeSpmfGraphList(getProjectTypeGraphs(dir));
-}

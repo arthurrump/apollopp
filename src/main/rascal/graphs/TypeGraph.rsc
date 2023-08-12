@@ -1,10 +1,10 @@
 module graphs::TypeGraph
 
-import IO;
 import Set;
 import String;
 
 import analysis::graphs::LabeledGraph;
+import graphs::LLGraph;
 import lang::java::m3::Core;
 import lang::java::m3::AST;
 
@@ -33,38 +33,38 @@ private set[loc] getCompilationUnitTypes(loc element, M3 model) {
     }
 }
 
-data TypeGraphAnnotation
+data TypeGraphVertexLabel
     = \nameClass(str nameClass)
     | \modifier(Modifier modifier)
     | \inProjectDecl(str scheme)
     | \externalDecl(loc location)
     ;
 
-data TypeGraphEdge
+data TypeGraphEdgeLabel
     = \extends()
     | \implements()
     | \invokes()
     | \dependsOn()
     | \contains()
-    | \annotated(TypeGraphAnnotation annotation)
     ;
 
-alias TypeGraph = LGraph[loc, TypeGraphEdge];
+alias TypeGraph = LLGraph[loc, TypeGraphVertexLabel, TypeGraphEdgeLabel];
+alias TypeGraphPattern = PatternLLGraph[loc, TypeGraphVertexLabel, TypeGraphEdgeLabel];
 
-alias Annotate = set[TypeGraphAnnotation] (loc);
+alias Annotate = set[TypeGraphVertexLabel] (loc);
 
-set[TypeGraphAnnotation] annotateNone(loc _) {
+set[TypeGraphVertexLabel] annotateNone(loc _) {
     return {};
 }
 
 Annotate combine(set[Annotate] annotates) {
-    return set[TypeGraphAnnotation] (loc \node) {
+    return set[TypeGraphVertexLabel] (loc \node) {
         return union({ a(\node) | a <- annotates });
     };
 }
 
 Annotate annotateInProjectDecls(M3 model) {
-    return set[TypeGraphAnnotation] (loc \node) {
+    return set[TypeGraphVertexLabel] (loc \node) {
         if (isNameDeclaredInProject(\node, model)) {
             return { \inProjectDecl(\node.scheme) };
         };
@@ -73,7 +73,7 @@ Annotate annotateInProjectDecls(M3 model) {
 }
 
 Annotate annotateExternalDecls(M3 model) {
-    return set[TypeGraphAnnotation] (loc \node) {
+    return set[TypeGraphVertexLabel] (loc \node) {
         if (!isNameDeclaredInProject(\node, model)) {
             return { \externalDecl(\node) };
         }
@@ -82,14 +82,14 @@ Annotate annotateExternalDecls(M3 model) {
 }
 
 Annotate annotateModifiers(M3 model) {
-    return set[TypeGraphAnnotation] (loc \node) {
+    return set[TypeGraphVertexLabel] (loc \node) {
         return { \modifier(m) | <\node, m> <- model.modifiers };
     };
 }
 
 Annotate annotateNameClass(rel[str, str] nameClasses, M3 model) {
     rel[loc, str] elementNames = model.names<qualifiedName, simpleName>;
-    return set[TypeGraphAnnotation] (loc \node) {
+    return set[TypeGraphVertexLabel] (loc \node) {
         if (isNameDeclaredInProject(\node, model)) {
             return { \nameClass(c) | <namePart, c> <- nameClasses, name <- elementNames[\node], contains(name, namePart) };
         }
@@ -108,7 +108,7 @@ Annotate annotateDefaults(M3 model, rel[str, str] nameClasses) {
 
 TypeGraph createTypeGraph(M3 model, Annotate annotate, bool incudeCompilationUnitAsTypes = false) {
     // Extending classes and implementing interfaces
-    TypeGraph g = { <from, \extends(), to> | <from, to> <- model.extends };
+    LGraph[loc, TypeGraphEdgeLabel] g = { <from, \extends(), to> | <from, to> <- model.extends };
     g += { <from, \implements(), to> | <from, to> <- model.implements };
 
     // All containment relations between M3 elements
@@ -134,8 +134,12 @@ TypeGraph createTypeGraph(M3 model, Annotate annotate, bool incudeCompilationUni
     // structure even if methods are split up differently.
     g += { <fromAll, \invokes(), to> | <from, to> <- model.methodInvocation, fromAll <- getContainingTypes(from, model) };
 
-    // Annotate the graph using the annotation function
-    g += { <\node, \annotated(a), \node> | \node <- (g<from> + g<to>), a <- annotate(\node) };
 
-    return g;
+    // Label the graph nodes using the annotation function
+    labelVertex = Vertex[loc, TypeGraphVertexLabel] (loc \node) {
+        return Vertex(\node, labels = annotate(\node));
+    };
+    TypeGraph labeled = { <labelVertex(from), label, labelVertex(to)> | <from, label, to> <- g };
+
+    return labeled;
 }

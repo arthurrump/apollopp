@@ -48,8 +48,7 @@ data TypeGraphEdgeLabel
     | \contains()
     ;
 
-alias TypeGraph = LLGraph[loc, TypeGraphVertexLabel, TypeGraphEdgeLabel];
-alias TypeGraphPattern = PatternLLGraph[loc, TypeGraphVertexLabel, TypeGraphEdgeLabel];
+alias TypeGraph[&VertexId] = LLGraph[&VertexId, TypeGraphVertexLabel, TypeGraphEdgeLabel];
 
 alias Annotate = set[TypeGraphVertexLabel] (loc);
 
@@ -106,7 +105,7 @@ Annotate annotateDefaults(M3 model, rel[str, str] nameClasses) {
     });
 }
 
-TypeGraph createTypeGraph(M3 model, Annotate annotate, bool incudeCompilationUnitAsTypes = false) {
+TypeGraph[loc] createTypeGraph(M3 model, Annotate annotate, bool incudeCompilationUnitAsTypes = false) {
     // Extending classes and implementing interfaces
     LGraph[loc, TypeGraphEdgeLabel] g = { <from, \extends(), to> | <from, to> <- model.extends };
     g += { <from, \implements(), to> | <from, to> <- model.implements };
@@ -139,7 +138,7 @@ TypeGraph createTypeGraph(M3 model, Annotate annotate, bool incudeCompilationUni
     labelVertex = Vertex[loc, TypeGraphVertexLabel] (loc \node) {
         return Vertex(\node, labels = annotate(\node));
     };
-    TypeGraph labeled = { <labelVertex(from), label, labelVertex(to)> | <from, label, to> <- g };
+    TypeGraph[loc] labeled = { <labelVertex(from), label, labelVertex(to)> | <from, label, to> <- g };
 
     return labeled;
 }

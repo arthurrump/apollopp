@@ -9,12 +9,3 @@ data Vertex[&Id, &VertexLabel]
 alias LLGraph[&VertexId, &VertexLabel, &EdgeLabel] 
     = LGraph[Vertex[&VertexId, &VertexLabel], &EdgeLabel]
     ;
-
-data Pattern[&T] 
-    = Required(&T required)
-    | Forbidden(&T forbidden)
-    ;
-
-alias PatternLLGraph[&VertexId, &VertexLabel, &EdgeLabel] 
-    = LGraph[Pattern[Vertex[&VertexId, Pattern[&VertexLabel]]], Pattern[&EdgeLabel]]
-    ;

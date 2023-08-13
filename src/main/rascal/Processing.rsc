@@ -17,7 +17,7 @@ M3 createModel(loc project) {
     return createM3FromDirectory(project, javaVersion = "1.8", classPath = processingClassPath);
 }
 
-TypeGraph createTypeGraph(M3 model) {
+TypeGraph[loc] createTypeGraph(M3 model) {
     return graphs::TypeGraph::createTypeGraph(model, annotateDefaults(model, relid({ "Particle", "System", "Flock", "Boid" })));
 }
 
@@ -35,7 +35,7 @@ list[M3] getProjectModels(loc dir) {
     return result;
 }
 
-list[TypeGraph] getProjectTypeGraphs(loc dir) {
+list[TypeGraph[loc]] getProjectTypeGraphs(loc dir) {
     result = for (model <- getProjectModels(dir)) {
         println("Building type graph for <model.id>");
         append createTypeGraph(model);

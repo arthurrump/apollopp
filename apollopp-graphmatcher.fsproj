@@ -7,6 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="RTree.fs" />
+    <Compile Include="SetTrieSetMap.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

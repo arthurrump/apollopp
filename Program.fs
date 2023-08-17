@@ -1,7 +1,10 @@
 ﻿module Apollopp
 
+open RTree
 open System
+open System.Collections.Immutable
 open System.IO
+open System.Numerics
 open Thoth.Json.Net
 
 type Edge<'node, 'edge> = 'node * 'edge * 'node
@@ -12,6 +15,15 @@ module Edge =
     let inline from ((from, _, _): Edge<'node, 'edge>) : 'node = from
     let inline edge ((_, edge, _): Edge<'node, 'edge>) : 'edge = edge
     let inline to' ((_, _, to'): Edge<'node, 'edge>) : 'node = to'
+
+module Seq =
+    open Microsoft.FSharp.Core.LanguagePrimitives
+
+    let inline maxOrZero (s: seq<'a>) =
+        if Seq.isEmpty s then GenericZero else Seq.max s
+
+    let inline minOrZero (s: seq<'a>) =
+        if Seq.isEmpty s then GenericZero else Seq.min s
 
 module Map =
     let singleton key value =
@@ -51,6 +63,10 @@ module Graph =
     // O(N*log(N))
     let inline nodes (graph: Graph<'node, 'edge>) : Set<'node> =
         Set.union (from graph) (to' graph)
+
+    // O(N*log(N))
+    let inline edges (graph: Graph<'node, 'edge>) : Set<'edge> =
+        Set.map Edge.edge graph
 
     // O(N)
     let inline edgesFrom (node: 'node) (graph: Graph<'node, 'edge>) : Graph<'node, 'edge> =
@@ -177,71 +193,6 @@ module Pattern =
                 )
         helper 0 pattern mapping target |> Option.map (fun (_, pattern, mappings) -> pattern, mappings)
 
-module GlasgowSubgraphSolver =
-    open System.Diagnostics
-
-    let writeCsv (writer: TextWriter) (graph: Graph<string, string>) =
-        for (from, edge, to') in graph do
-            writer.Write(Uri.EscapeDataString(from))
-            writer.Write('>')
-            writer.Write(Uri.EscapeDataString(to'))
-            writer.Write(',')
-            writer.Write(Uri.EscapeDataString(edge))
-            writer.WriteLine()
-
-    type private TempFile() =
-        let path = Path.GetTempFileName()
-
-        member __.Path = path
-
-        interface IDisposable with
-            member __.Dispose() =
-                ()//File.Delete(path)
-
-    let private writeTempCsvFile graph =
-        let tmpFile = new TempFile()
-        use file = File.OpenWrite(tmpFile.Path)
-        use writer = new StreamWriter(file)
-        writeCsv writer graph
-        tmpFile
-
-    let parseMapping (line: string) : Map<string, string> =
-        if not (line.StartsWith("mapping = ")) then
-            failwith "Line is not a mapping"
-        
-        // Strip "mapping = (" and final ")"
-        let mapping = line["mapping = (".Length .. line.Length - 2]
-        // Split on the ") (" between each pair
-        mapping.Split(") (")
-        |> Array.map (fun pair ->
-            // Slpit pairs on " -> " between the ids
-            let [| left; right |] = pair.Split(" -> ")
-            Uri.UnescapeDataString(left), Uri.UnescapeDataString(right)
-        )
-        |> Map.ofArray
-
-    let private readOutput (reader: TextReader) =
-        let mutable line = reader.ReadLine()
-        seq {
-            while line <> null do
-                Console.WriteLine(line)
-                if line.StartsWith("mapping = ") then
-                    yield parseMapping line
-                line <- reader.ReadLine()
-        }
-
-    let run (pattern: Graph<string, string>) (target: Graph<string, string>) : Map<string, string> array =
-        use patternFile = writeTempCsvFile pattern
-        use targetFile = writeTempCsvFile target
-        let info = ProcessStartInfo(
-            "./glasgow_subgraph_solver", 
-            $"--print-all-solutions %s{patternFile.Path} %s{targetFile.Path}",
-            RedirectStandardOutput = true
-        )
-        let proc = Process.Start(info)
-        readOutput proc.StandardOutput
-        |> Seq.toArray
-
 type TypeGraphAnnotation =
     | NameClass of nameClass: string
     | Modifier of modifier: string
@@ -301,23 +252,16 @@ module TypeGraph =
     let decoder (nodeDecoder: Decoder<'node>) : Decoder<TypeGraph<'node>> = 
         Graph.decoder nodeDecoder TypeGraphEdge.decoder
 
-    let toStringGraph (nodeEncoder: 'node -> string) = 
-        Graph.toStringGraph nodeEncoder (TypeGraphEdge.encoder >> Encode.toString 0)
-    let fromStringGraph (nodeDecoder: string -> 'node) = 
-        Graph.fromStringGraph nodeDecoder (Decode.fromString TypeGraphEdge.decoder >> Result.toOption >> Option.get)
-
 let target = 
-    match Decode.fromString (TypeGraph.decoder Decode.string) (File.ReadAllText("/mnt/d/Arthur/Desktop/tg.json")) with
+    match Decode.fromString (TypeGraph.decoder Decode.string) (File.ReadAllText("D:/Arthur/Desktop/tg.json")) with
     | Ok target -> target
     | Error err -> failwith err
     
-let pattern: Graph<int, TypeGraphEdge> = 
+let pattern: TypeGraph<int> = 
     set [ (0, Annotated (InProjectDecl "java+class"), 0) 
           (1, Annotated (InProjectDecl "java+method"), 1)
           (1, Annotated (Modifier "public"), 1)
           (0, Contains, 1) ]
-
-// let mapping = GlasgowSubgraphSolver.run (TypeGraph.toStringGraph string pattern) (TypeGraph.toStringGraph id target)
 
 let testTarget = set [
     ("t0", "class", "t0")
@@ -350,3 +294,148 @@ let testPattern = set [
     ("p1", "public", "p1")
     ("p0", "contains", "p1")
 ]
+
+type MultiGraph = Set<int>[,]
+type Signature =
+    { Incoming: ImmutableArray<Set<int>>
+      Outgoing: ImmutableArray<Set<int>> }
+    member this.Combined = this.Incoming.AddRange(this.Outgoing)
+
+module MultiGraph =
+    let initEmpty (nodeCount: int) : MultiGraph = 
+        Array2D.create nodeCount nodeCount Set.empty
+
+    let fromIntGraph (graph: Graph<int, int>) : MultiGraph =
+        let nodeCount = graph |> Graph.nodes |> Set.count
+        Array2D.init nodeCount nodeCount (fun from to' -> Graph.edgesFromTo from to' graph)
+    
+    let fromGraph (graph: Graph<'node, 'edge>) : MultiGraph * ImmutableArray<'node> * ImmutableArray<'edge> =
+        let edgeArray = graph |> Graph.edges |> ImmutableArray.ToImmutableArray
+        let nodeArray = graph |> Graph.nodes |> ImmutableArray.ToImmutableArray
+        let edgeMap = edgeArray |> Seq.mapi (fun index edge -> edge, index) |> Map.ofSeq
+        let graph =
+            Array2D.init nodeArray.Length nodeArray.Length (fun from to' -> 
+                Graph.edgesFromTo nodeArray.[from] nodeArray.[to'] graph 
+                |> Set.map (fun edge -> edgeMap.[edge]) 
+            )
+        graph, nodeArray, edgeArray
+
+    let nodeCount : MultiGraph -> int = Array2D.length1
+
+    let getMultiEdge (from: int) (to': int) (graph: MultiGraph) : Set<int> =
+        graph.[from, to']
+
+    let adjacent (node: int) (graph: MultiGraph) =
+        let filterConnections =
+            Array.mapi (fun to' edges -> to', edges) 
+            >> Array.choose (fun (to', edges) -> if Set.isEmpty edges then None else Some to')
+        Set.union 
+            (set (filterConnections graph.[node, *]))
+            (set (filterConnections graph.[*, node]))
+
+    let signature (graph: MultiGraph) (node: int) : Signature =
+        { Incoming = 
+            graph.[*, node] |> Seq.filter (not << Set.isEmpty) |> ImmutableArray.ToImmutableArray
+          Outgoing = 
+            graph.[node, *] |> Seq.filter (not << Set.isEmpty) |> ImmutableArray.ToImmutableArray }
+
+    let signatureMap (graph: MultiGraph) : ImmutableArray<Signature> =
+        Seq.init (nodeCount graph) (signature graph)
+        |> ImmutableArray.ToImmutableArray
+    
+module DirectedSuMGra =
+    type SignatureIndex = RTree<int, int> 
+    type NeighborhoodIndex = 
+        { IncomingIndex: NotImplementedException
+          OutgoingIndex: NotImplementedException }
+
+    let features (signature: Signature) : Vector<int> =
+        [| // f1 Cardinality of vertex signature
+           // signature.Incoming.Count + signature.Outgoing.Count
+           // f1a Cardinality of incoming vertex signature
+           signature.Incoming.Length
+           // f1b Cardinality of outgoing vertex signature
+           signature.Outgoing.Length
+           // f2 The number of unique dimensions in the vertex signature
+           // Set.union signature.Incoming signature.Outgoing |> Set.unionMany |> Set.count
+           // f2a The number of unique dimensions in the incoming vertex signature
+           signature.Incoming |> Set.unionMany |> Set.count
+           // f2b The number of unique dimensions in the outgoing vertex signature
+           signature.Outgoing |> Set.unionMany |> Set.count
+           // f3 The number of all occurrences of the dimensions (repetition allowed)
+           (Seq.sumBy Set.count signature.Incoming) + (Seq.sumBy Set.count signature.Outgoing)
+           // f4 Minimum index of the lexicographically ordered edge dimensions
+           // "the field f4 contains the minimum value of the index, and hence we
+           // negate f4 so that the rectangular containment problem still holds
+           // good"
+           // -1 * (signature |> Seq.map Set.minElement |> Seq.minOrZero)
+           // f5 Maximum index of the lexicographically ordered edge dimensions
+           // signature |> Seq.map Set.maxElement |> Seq.maxOrZero
+           // f6 Maximum cardinality of the vertex sub-signature
+           signature.Combined |> Seq.map Set.count |> Seq.maxOrZero |]
+        |> Vector
+
+    let signatureIndex (graph: MultiGraph) : SignatureIndex =
+        MultiGraph.signatureMap graph
+        |> Seq.mapi (fun i signature -> features signature, i)
+        |> Seq.toArray
+        |> RTree.create 64
+
+    let orderQuery (query: MultiGraph) : MultiGraph =
+        let r1 node = 
+            let signature = MultiGraph.signature query node
+            signature.Incoming.Length + signature.Outgoing.Length
+        let r2 ordered node = 
+            Set.intersect ordered (MultiGraph.adjacent node query)
+            |> Set.count
+        
+        let nodeCount = MultiGraph.nodeCount query
+        let order = Array.zeroCreate nodeCount
+        order.[0] <- [ 0 .. nodeCount - 1 ] |> Seq.maxBy r1
+        let orderedSet = Set.singleton order.[0]
+        let unorderedSet = set [ 0 .. nodeCount - 1 ] - orderedSet
+        
+        Seq.init (nodeCount - 1) (fun i -> i + 1)
+        |> Seq.fold (fun (orderedSet, unorderedSet) i ->
+            let next = 
+                unorderedSet 
+                |> Seq.groupBy (r2 orderedSet) |> Seq.maxBy fst |> snd
+                |> Seq.maxBy r1
+            order.[i] <- next
+            Set.add next orderedSet, Set.remove next unorderedSet
+        ) (orderedSet, unorderedSet)
+        |> ignore
+
+        let orderedQuery = MultiGraph.initEmpty nodeCount
+        for from in [ 0 .. nodeCount - 1 ] do
+            for to' in [ 0 .. nodeCount - 1 ] do
+                orderedQuery.[from, to'] <- query.[order.[from], order.[to']]
+        orderedQuery
+
+    let selectCandidates (signatureIndex: SignatureIndex) (queryFeatures: ImmutableArray<Vector<int>>) (queryNode: int) : ImmutableArray<int> =
+        signatureIndex 
+        |> RTree.search { Low = Vector.Zero; High = queryFeatures.[queryNode] }
+
+    let findJoinable (neighborhoodIndex: NeighborhoodIndex) (mapping: Map<int, int>) (orderedQuery: MultiGraph) (queryNode: int) : int[] =
+        failwith "Not implemented"
+
+    let rec subgraphsSearch (neighborhoodIndex: NeighborhoodIndex) (mapping: Map<int, int>) (orderedQuery: MultiGraph) (queryNode: int) (target: MultiGraph) : Map<int, int> seq =
+        let queryNode = queryNode + 1
+        let candidateNodes = findJoinable neighborhoodIndex mapping orderedQuery queryNode
+        seq {
+            for candidateNode in candidateNodes do
+                let mapping = Map.add queryNode candidateNode mapping
+                if queryNode = MultiGraph.nodeCount orderedQuery - 1 then
+                    yield mapping
+                else
+                    yield! subgraphsSearch neighborhoodIndex mapping orderedQuery queryNode target
+        } 
+
+    let query (signatureIndex: SignatureIndex) (neighborhoodIndex: NeighborhoodIndex) (queryFeatures: ImmutableArray<Vector<int>>) (orderedQuery: MultiGraph) (target: MultiGraph) =
+        let initQueryNode = 0
+        let initCandidateNodes = selectCandidates signatureIndex queryFeatures initQueryNode
+        seq {
+            for candidateNode in initCandidateNodes do
+                let mapping = Map.singleton initQueryNode candidateNode
+                yield! subgraphsSearch neighborhoodIndex mapping orderedQuery initQueryNode target
+        } |> Seq.toArray

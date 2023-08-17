@@ -4,7 +4,6 @@ open RTree
 open System
 open System.Collections.Immutable
 open System.IO
-open System.Numerics
 open Thoth.Json.Net
 
 type Edge<'node, 'edge> = 'node * 'edge * 'node
@@ -349,7 +348,7 @@ module DirectedSuMGra =
         { IncomingIndex: NotImplementedException
           OutgoingIndex: NotImplementedException }
 
-    let features (signature: Signature) : Vector<int> =
+    let features (signature: Signature) : int[] =
         [| // f1 Cardinality of vertex signature
            // signature.Incoming.Count + signature.Outgoing.Count
            // f1a Cardinality of incoming vertex signature
@@ -373,7 +372,6 @@ module DirectedSuMGra =
            // signature |> Seq.map Set.maxElement |> Seq.maxOrZero
            // f6 Maximum cardinality of the vertex sub-signature
            signature.Combined |> Seq.map Set.count |> Seq.maxOrZero |]
-        |> Vector
 
     let signatureIndex (graph: MultiGraph) : SignatureIndex =
         MultiGraph.signatureMap graph
@@ -412,9 +410,9 @@ module DirectedSuMGra =
                 orderedQuery.[from, to'] <- query.[order.[from], order.[to']]
         orderedQuery
 
-    let selectCandidates (signatureIndex: SignatureIndex) (queryFeatures: ImmutableArray<Vector<int>>) (queryNode: int) : ImmutableArray<int> =
+    let selectCandidates (signatureIndex: SignatureIndex) (queryFeatures: ImmutableArray<int[]>) (queryNode: int) : ImmutableArray<int> =
         signatureIndex 
-        |> RTree.search { Low = Vector.Zero; High = queryFeatures.[queryNode] }
+        |> RTree.search (Rect.createFromOrigin queryFeatures.[queryNode])
 
     let findJoinable (neighborhoodIndex: NeighborhoodIndex) (mapping: Map<int, int>) (orderedQuery: MultiGraph) (queryNode: int) : int[] =
         failwith "Not implemented"
@@ -431,7 +429,7 @@ module DirectedSuMGra =
                     yield! subgraphsSearch neighborhoodIndex mapping orderedQuery queryNode target
         } 
 
-    let query (signatureIndex: SignatureIndex) (neighborhoodIndex: NeighborhoodIndex) (queryFeatures: ImmutableArray<Vector<int>>) (orderedQuery: MultiGraph) (target: MultiGraph) =
+    let query (signatureIndex: SignatureIndex) (neighborhoodIndex: NeighborhoodIndex) (queryFeatures: ImmutableArray<int[]>) (orderedQuery: MultiGraph) (target: MultiGraph) =
         let initQueryNode = 0
         let initCandidateNodes = selectCandidates signatureIndex queryFeatures initQueryNode
         seq {

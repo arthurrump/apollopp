@@ -58,7 +58,7 @@ let neighborhoodIndex (graph: MultiGraph) : NeighborhoodIndex =
     let createEdgesIndex edges =
         edges
         |> Array.mapi (fun neighbor edges -> edges, neighbor)
-        |> Array.filter (fun (edges, _) -> Set.isEmpty edges)
+        |> Array.filter (fun (edges, _) -> not (Set.isEmpty edges))
         |> SetTrieSetMap.create
     let createNodeIndex node =
         { IncomingIndex = createEdgesIndex graph[*, node] 

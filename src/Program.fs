@@ -1,19 +1,12 @@
-module Apollopp
+﻿module Apollopp
 
+open Graph
+open MultiGraph
 open RTree
-open System
+open SetTrieSetMap
 open System.Collections.Immutable
 open System.IO
 open Thoth.Json.Net
-
-type Edge<'node, 'edge> = 'node * 'edge * 'node
-type Graph<'node, 'edge when 'node : comparison and 'edge : comparison> = 
-    Set<Edge<'node, 'edge>>
-
-module Edge =
-    let inline from ((from, _, _): Edge<'node, 'edge>) : 'node = from
-    let inline edge ((_, edge, _): Edge<'node, 'edge>) : 'edge = edge
-    let inline to' ((_, _, to'): Edge<'node, 'edge>) : 'node = to'
 
 module Seq =
     open Microsoft.FSharp.Core.LanguagePrimitives
@@ -50,147 +43,11 @@ module Map =
             )
         ) (Some map1)
 
-module Graph =
-    // O(N*log(N))
-    let inline from (graph: Graph<'node, 'edge>) : Set<'node> =
-        Set.map Edge.from graph
-
-    // O(N*log(N))
-    let inline to' (graph: Graph<'node, 'edge>) : Set<'node> =
-        Set.map Edge.to' graph
-
-    // O(N*log(N))
-    let inline nodes (graph: Graph<'node, 'edge>) : Set<'node> =
-        Set.union (from graph) (to' graph)
-
-    // O(N*log(N))
-    let inline edges (graph: Graph<'node, 'edge>) : Set<'edge> =
-        Set.map Edge.edge graph
-
-    // O(N)
-    let inline edgesFrom (node: 'node) (graph: Graph<'node, 'edge>) : Graph<'node, 'edge> =
-        Set.filter (fun (from, _, _) -> from = node) graph
-
-    // O(N)
-    let inline edgesTo (node: 'node) (graph: Graph<'node, 'edge>) : Graph<'node, 'edge> =
-        Set.filter (fun (_, _, to') -> to' = node) graph
-
-    // O(N*log(N))
-    let inline edgesFromTo (from: 'node) (to': 'node) (graph: Graph<'node, 'edge>) : Set<'edge> =
-        Set.filter (fun (f, _, t) -> f = from && t = to') graph
-        |> Set.map Edge.edge
-
-    // O(N)
-    let inline connectedEdges (node: 'node) (graph: Graph<'node, 'edge>) : Graph<'node, 'edge> =
-        Set.filter (fun (from, _, to') -> node = from || node = to') graph
-
-    // O(N*log(N))
-    let inline allConnectedEdges (nodes: Set<'node>) (graph: Graph<'node, 'edge>) : Graph<'node, 'edge> =
-        Set.filter (fun (from, _, to') -> Set.contains from nodes || Set.contains to' nodes) graph
-
-    let inline extendedSubgraph (subgraph: Graph<'node, 'edge>) (graph: Graph<'node, 'edge>) : Graph<'node, 'edge> =
-        allConnectedEdges (nodes subgraph) graph
-
-    // O(N*log(N))
-    let inline subgraphExtension (subgraph: Graph<'node, 'edge>) (graph: Graph<'node, 'edge>) : Graph<'node, 'edge> =
-        Set.difference (extendedSubgraph subgraph graph) subgraph
-
-    // O(N*log(N))
-    let inline combine (graph1: Graph<'node, 'edge>) (graph2: Graph<'node, 'edge>) : Graph<'node, 'edge> =
-        Set.union graph1 graph2
-
-    let toStringGraph (nodeEncoder: 'node -> string) (edgeEncoder: 'edge -> string) (graph: Graph<'node, 'edge>) : Graph<string, string> =
-        graph
-        |> Set.map (fun (from, edge, to') -> nodeEncoder from, edgeEncoder edge, nodeEncoder to')
-
-    let fromStringGraph (nodeDecoder: string -> 'node) (edgeDecoder: string -> 'edge) (graph: Graph<string, string>) : Graph<'node, 'edge> =
-        graph
-        |> Set.map (fun (from, edge, to') -> nodeDecoder from, edgeDecoder edge, nodeDecoder to')
-
-    let encoder (nodeEncoder: Encoder<'node>) (edgeEncoder: Encoder<'edge>) : Encoder<Graph<'node, 'edge>> =
-        Seq.map (Encode.tuple3 nodeEncoder edgeEncoder nodeEncoder)
-        >> Encode.seq
-
-    let decoder (nodeDecoder: Decoder<'node>) (edgeDecoder: Decoder<'edge>) : Decoder<Graph<'node, 'edge>> =
-        Decode.list (Decode.tuple3 nodeDecoder edgeDecoder nodeDecoder)
-        |> Decode.map (Set.ofList)
-
 type Verdict = Positive | Negative | Neutral
 type Pattern<'node, 'edge when 'node : comparison and 'edge : comparison> =
     { Verdict: Verdict
       Graph: Graph<'node, 'edge>
       Children: Pattern<'node, 'edge> list }
-
-module Pattern =
-    let extendMapping (patternExtension: Graph<'pnode, 'edge>) (mapping: Map<'pnode, 'tnode>) (target: Graph<'tnode, 'edge>) : Map<'pnode, 'tnode> array =
-        patternExtension
-        |> Seq.map (fun (pFrom, pEdge, pTo) ->
-            match Map.tryFind pFrom mapping, Map.tryFind pTo mapping with
-            // Both nodes are already mapped, if the required edge exists, the
-            // mapping is valid and no extension is required
-            | Some tFrom, Some tTo when Set.contains pEdge (Graph.edgesFromTo tFrom tTo target) ->
-                [| Map.empty |]
-            // Both nodes are already mapped, but the required edge does not
-            // exist, so the mapping is not valid
-            | Some _, Some _ -> 
-                [||]
-            | Some tFrom, None ->
-                target 
-                |> Seq.filter (fun (f, e, t) -> f = tFrom && e = pEdge && not (Map.containsValue t mapping))
-                |> Seq.map (fun (_, _, t) -> Map.singleton pTo t)
-                |> Seq.toArray
-            | None, Some tTo ->
-                target 
-                |> Seq.filter (fun (f, e, t) -> e = pEdge && t = tTo && not (Map.containsValue f mapping))
-                |> Seq.map (fun (f, _, _) -> Map.singleton pFrom f)
-                |> Seq.toArray
-            | None, None ->
-                target 
-                |> Seq.filter (fun (tFrom, tEdge, tTo) ->
-                    tEdge = pEdge 
-                    && not (Map.containsValue tFrom mapping) 
-                    && not (Map.containsValue tTo mapping)
-                )
-                |> Seq.map (fun (tFrom, _, tTo) -> Map.ofArray [| (pFrom, tFrom); (pTo, tTo) |])
-                |> Seq.toArray
-        )
-        |> Seq.fold (fun mappings mappingExtensions ->
-            mappings |> Array.collect (fun mapping ->
-                mappingExtensions |> Array.choose (Map.tryCombineInjective mapping)
-            )
-        ) ([| Map.empty |])
-        |> Array.choose (Map.tryCombineInjective mapping)
-
-    let tryFindChildMatch (pattern: Pattern<'pnode, 'edge>) (mapping: Map<'pnode, 'tnode>) (target: Graph<'tnode, 'edge>) : Option<Pattern<'pnode, 'edge> * Map<'pnode, 'tnode> array> =
-        let rec helper depth pattern mapping target : Option<int * Pattern<'pnode, 'edge> * Map<'pnode, 'tnode> array> =
-            let thisLevelMatches = // All children that extend the mapping with at least one valid mapping
-                pattern.Children
-                |> Seq.map (fun child -> child, extendMapping child.Graph mapping target)
-                |> Seq.filter (fun (_, mappings) -> not (Array.isEmpty mappings))
-                |> Seq.toArray
-
-            let subMatchesByDepth =
-                thisLevelMatches 
-                |> Array.collect (fun (child, mappings) -> 
-                    mappings |> Array.choose (fun mapping -> helper (depth + 1) child mapping target)
-                )
-                |> Array.groupBy (fun (depth, _, _) -> depth)
-
-            if subMatchesByDepth |> Array.isEmpty then
-                thisLevelMatches
-                |> Array.tryHead
-                |> Option.map (fun (child, mappings) -> depth, child, mappings)
-            else
-                let depth, subMatches =
-                    subMatchesByDepth
-                    |> Array.maxBy (fun (depth, _) -> depth)
-                subMatches
-                |> Seq.groupBy (fun (_, pattern, _) -> pattern)
-                |> Seq.tryHead
-                |> Option.map (fun (pattern, matches) -> 
-                    depth, pattern, matches |> Seq.collect (fun (_, _, mappings) -> mappings) |> Seq.toArray
-                )
-        helper 0 pattern mapping target |> Option.map (fun (_, pattern, mappings) -> pattern, mappings)
 
 type TypeGraphAnnotation =
     | NameClass of nameClass: string
@@ -294,54 +151,6 @@ let testPattern = set [
     ("p0", "contains", "p1")
 ]
 
-type MultiGraph = Set<int>[,]
-type Signature =
-    { Incoming: ImmutableArray<Set<int>>
-      Outgoing: ImmutableArray<Set<int>> }
-    member this.Combined = this.Incoming.AddRange(this.Outgoing)
-
-module MultiGraph =
-    let initEmpty (nodeCount: int) : MultiGraph = 
-        Array2D.create nodeCount nodeCount Set.empty
-
-    let fromIntGraph (graph: Graph<int, int>) : MultiGraph =
-        let nodeCount = graph |> Graph.nodes |> Set.count
-        Array2D.init nodeCount nodeCount (fun from to' -> Graph.edgesFromTo from to' graph)
-    
-    let fromGraph (graph: Graph<'node, 'edge>) : MultiGraph * ImmutableArray<'node> * ImmutableArray<'edge> =
-        let edgeArray = graph |> Graph.edges |> ImmutableArray.ToImmutableArray
-        let nodeArray = graph |> Graph.nodes |> ImmutableArray.ToImmutableArray
-        let edgeMap = edgeArray |> Seq.mapi (fun index edge -> edge, index) |> Map.ofSeq
-        let graph =
-            Array2D.init nodeArray.Length nodeArray.Length (fun from to' -> 
-                Graph.edgesFromTo nodeArray.[from] nodeArray.[to'] graph 
-                |> Set.map (fun edge -> edgeMap.[edge]) 
-            )
-        graph, nodeArray, edgeArray
-
-    let nodeCount : MultiGraph -> int = Array2D.length1
-
-    let getMultiEdge (from: int) (to': int) (graph: MultiGraph) : Set<int> =
-        graph.[from, to']
-
-    let adjacent (node: int) (graph: MultiGraph) =
-        let filterConnections =
-            Array.mapi (fun to' edges -> to', edges) 
-            >> Array.choose (fun (to', edges) -> if Set.isEmpty edges then None else Some to')
-        Set.union 
-            (set (filterConnections graph.[node, *]))
-            (set (filterConnections graph.[*, node]))
-
-    let signature (graph: MultiGraph) (node: int) : Signature =
-        { Incoming = 
-            graph.[*, node] |> Seq.filter (not << Set.isEmpty) |> ImmutableArray.ToImmutableArray
-          Outgoing = 
-            graph.[node, *] |> Seq.filter (not << Set.isEmpty) |> ImmutableArray.ToImmutableArray }
-
-    let signatureMap (graph: MultiGraph) : ImmutableArray<Signature> =
-        Seq.init (nodeCount graph) (signature graph)
-        |> ImmutableArray.ToImmutableArray
-    
 module DirectedSuMGra =
     type SignatureIndex = RTree<int, int> 
 

@@ -92,6 +92,15 @@ let tests =
                 |]
                 test <@ set (RTree.search (Rect.createPoint [| 0; 1; 5; 4 |]) tree) = set [ 1; 3 ] @>
 
+            testCase "Finds entry when searched by Rect.fromOrigin" <| fun () ->
+                let tree = RTree.create 2 [|
+                    [| 0; 1; 5; 4 |], 1
+                    [| 1; 9; 8; 2 |], 2
+                    [| 0; 1; 5; 4 |], 3
+                    [| 1; 4; 0; 5 |], 4
+                |]
+                test <@ set (RTree.search (Rect.createFromOrigin [| 1; 4; 6; 5 |]) tree) = set [ 1; 3; 4 ] @>
+
             testPropertyWithConfig withGen "Searching with wrapped finds all entries" <|
                 fun ((Entries entries): Entries<int, int>) ->
                     let tree = RTree.create 32 entries

@@ -1,4 +1,4 @@
-﻿module Apollopp
+module Apollopp
 
 open RTree
 open System
@@ -344,9 +344,11 @@ module MultiGraph =
     
 module DirectedSuMGra =
     type SignatureIndex = RTree<int, int> 
-    type NeighborhoodIndex = 
-        { IncomingIndex: NotImplementedException
-          OutgoingIndex: NotImplementedException }
+
+    type NeighborhoodNodeIndex = 
+        { IncomingIndex: SetTrieSetMap<int, int>
+          OutgoingIndex: SetTrieSetMap<int, int> }
+    type NeighborhoodIndex = NeighborhoodNodeIndex[]
 
     let features (signature: Signature) : int[] =
         [| // f1 Cardinality of vertex signature
@@ -371,13 +373,26 @@ module DirectedSuMGra =
            // f5 Maximum index of the lexicographically ordered edge dimensions
            // signature |> Seq.map Set.maxElement |> Seq.maxOrZero
            // f6 Maximum cardinality of the vertex sub-signature
-           signature.Combined |> Seq.map Set.count |> Seq.maxOrZero |]
+           Seq.append signature.Incoming signature.Outgoing |> Seq.map Set.count |> Seq.maxOrZero |]
 
     let signatureIndex (graph: MultiGraph) : SignatureIndex =
         MultiGraph.signatureMap graph
         |> Seq.mapi (fun i signature -> features signature, i)
         |> Seq.toArray
         |> RTree.create 64
+
+    let neighborhoodIndex (graph: MultiGraph) : NeighborhoodIndex =
+        let createEdgesIndex edges =
+            edges
+            |> Array.mapi (fun neighbor edges -> edges, neighbor)
+            |> Array.filter (fun (edges, _) -> Set.isEmpty edges)
+            |> SetTrieSetMap.create
+        let createNodeIndex node =
+            { IncomingIndex = createEdgesIndex graph[*, node] 
+              OutgoingIndex = createEdgesIndex graph[node, *] }
+        [ 0 .. MultiGraph.nodeCount graph - 1 ]
+        |> Seq.map createNodeIndex
+        |> Seq.toArray
 
     let orderQuery (query: MultiGraph) : MultiGraph =
         let r1 node = 
@@ -410,23 +425,63 @@ module DirectedSuMGra =
                 orderedQuery.[from, to'] <- query.[order.[from], order.[to']]
         orderedQuery
 
-    let selectCandidates (signatureIndex: SignatureIndex) (queryFeatures: ImmutableArray<int[]>) (queryNode: int) : ImmutableArray<int> =
+    let selectCandidates (signatureIndex: SignatureIndex) (queryFeatures: ImmutableArray<int[]>) (currentQueryNode: int) : ImmutableArray<int> =
         signatureIndex 
-        |> RTree.search (Rect.createFromOrigin queryFeatures.[queryNode])
+        |> RTree.search (Rect.createFromOrigin queryFeatures.[currentQueryNode])
 
-    let findJoinable (neighborhoodIndex: NeighborhoodIndex) (mapping: Map<int, int>) (orderedQuery: MultiGraph) (queryNode: int) : int[] =
-        failwith "Not implemented"
+    let findJoinable (neighborhoodIndex: NeighborhoodIndex) (mapping: Map<int, int>) (orderedQuery: MultiGraph) (currentQueryNode: int) : Set<int> =
+        // Find all adjacent nodes of the current (to-be-matched) query node and
+        MultiGraph.adjacent currentQueryNode orderedQuery
+        // filter to those that are already mapped (and include the mapped target node).
+        |> Seq.choose (fun mappedQueryNode -> 
+            mapping 
+            |> Map.tryFind mappedQueryNode 
+            |> Option.map (fun mappedTargetNode -> mappedQueryNode, mappedTargetNode)
+        )
+        // Select candidate target nodes based on the edges shared between
+        // previously mapped nodes and the current query node
+        |> Seq.map (fun (mappedQueryNode, mappedTargetNode) ->
+            // Only nodes that have both the required incoming and outgoing
+            // edges are valid candidates, so we take the intersection of the
+            // two candidate sets based on the neigborhood index.
+            Set.intersect
+                // Use the neighborhood index of a mapped target node to find
+                // all target nodes with outgoing edges that are a superset of
+                // the edges that come into that mapped target node. All target
+                // nodes that have these edges are candidates to map to the
+                // current query node.
+                (neighborhoodIndex.[mappedTargetNode].IncomingIndex |> SetTrieSetMap.searchSuperset orderedQuery.[currentQueryNode, mappedQueryNode])
+                // And vice versa for incoming edges that go out from the mapped
+                // target node.
+                (neighborhoodIndex.[mappedTargetNode].OutgoingIndex |> SetTrieSetMap.searchSuperset orderedQuery.[mappedQueryNode, currentQueryNode])
+        )
+        // Take the intersection of all candidate sets (for each neighbouring
+        // matched query node) to find the set of all target node candidates
+        // that fulfill the requirements regarding connections to the currently
+        // mapped part of the graph.
+        |> Set.intersectMany
+        // TODO: We can further prune the solution space by predicting if future
+        // growth of the mapping is possible, by checking if the vertex
+        // signature of the current query node is contained in the signatuer of
+        // each target node candidate. Signatures are sets of sets, and
+        // containment can be modeled as a bipartite graph with nodes for each
+        // set of edgeLabels in the signature and edges indicating the superset
+        // relation. If there is a maximum match that matches all nodes in the
+        // signature of the current query node, then we know that we can indeed
+        // expand the mapping from this node to its neighbours. The maximum
+        // matching can be found using Hopcroft-Karp.
+        // |> Set.filter (fun candidateTargetNode -> ...)
 
-    let rec subgraphsSearch (neighborhoodIndex: NeighborhoodIndex) (mapping: Map<int, int>) (orderedQuery: MultiGraph) (queryNode: int) (target: MultiGraph) : Map<int, int> seq =
-        let queryNode = queryNode + 1
-        let candidateNodes = findJoinable neighborhoodIndex mapping orderedQuery queryNode
+    let rec subgraphsSearch (neighborhoodIndex: NeighborhoodIndex) (mapping: Map<int, int>) (orderedQuery: MultiGraph) (currentQueryNode: int) (target: MultiGraph) : Map<int, int> seq =
+        let currentQueryNode = currentQueryNode + 1
+        let candidateNodes = findJoinable neighborhoodIndex mapping orderedQuery currentQueryNode
         seq {
             for candidateNode in candidateNodes do
-                let mapping = Map.add queryNode candidateNode mapping
-                if queryNode = MultiGraph.nodeCount orderedQuery - 1 then
+                let mapping = Map.add currentQueryNode candidateNode mapping
+                if currentQueryNode = MultiGraph.nodeCount orderedQuery - 1 then
                     yield mapping
                 else
-                    yield! subgraphsSearch neighborhoodIndex mapping orderedQuery queryNode target
+                    yield! subgraphsSearch neighborhoodIndex mapping orderedQuery currentQueryNode target
         } 
 
     let query (signatureIndex: SignatureIndex) (neighborhoodIndex: NeighborhoodIndex) (queryFeatures: ImmutableArray<int[]>) (orderedQuery: MultiGraph) (target: MultiGraph) =

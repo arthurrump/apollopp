@@ -46,12 +46,12 @@ module SignatureIndex =
 
     let create (signatureMap: ImmutableArray<Signature>) : SignatureIndex =
         signatureMap
-        |> Seq.mapi (fun i signature -> Rect.createFromOrigin (features signature), i)
+        |> Seq.mapi (fun i signature -> Rect.fromOriginToPoint (features signature), i)
         |> Seq.toArray
-        |> RTree.create 64
+        |> RTree.createSorted 64
 
     let search (features: int[]) (signatureIndex: SignatureIndex) : ImmutableArray<int> =
-        signatureIndex |> RTree.searchContainers (Rect.createFromOrigin features)
+        signatureIndex |> RTree.searchContainment (Rect.fromOriginToPoint features)
 
 type NeighborhoodNodeIndex = 
     { IncomingIndex: SetTrieSetMap<int, int>

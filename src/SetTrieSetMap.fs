@@ -31,7 +31,6 @@ module SetTrieSetMap =
         entries
         |> Seq.fold (fun trie (word, value) -> insert word value trie) empty
 
-
     let search (word: Set<'k>) (trie: SetTrieSetMap<'k, 'v>) : Set<'v> =
         let rec search word trie =
             match word with

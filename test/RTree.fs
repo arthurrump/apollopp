@@ -49,7 +49,61 @@ type RTreeGen() =
         } |> Arb.fromGen
 
 let withGen = { FsCheckConfig.defaultConfig with arbitrary = [ typeof<RTreeGen> ] }
-    
+
+let rTreeTests title create createFromPoints =
+    testList title [
+        testPropertyWithConfig withGen "Can find every entry when searched by point" <| 
+            fun ((PointEntries entries): PointEntries<int, int>) ->
+                let tree = createFromPoints 32 entries
+                for (point, value) in entries do
+                    test <@ RTree.searchInside (Rect.point point) tree |> ImmArray.contains value @>
+
+        testPropertyWithConfig withGen "Can find every entry when searched using searchContainers by point" <| 
+            fun ((PointEntries entries): PointEntries<int, int>) ->
+                let tree = createFromPoints 32 entries
+                for (point, value) in entries do
+                    test <@ RTree.searchContainment (Rect.point point) tree |> ImmArray.contains value @>
+
+        testPropertyWithConfig withGen "Can find every entry using searchContainers by its center point" <|
+            fun ((RectEntries entries): RectEntries<int, int>) ->
+                let tree = create 32 entries
+                for (rect, value) in entries do
+                    test <@ 
+                        RTree.searchContainment (Rect.point (Rect.center rect)) tree
+                        |> ImmArray.contains value
+                    @>
+
+        testCase "Can store and find multiple entries at the same point" <| fun () ->
+            let tree = createFromPoints 2 [|
+                [| 0; 1; 5; 4 |], 1
+                [| 1; 9; 8; 2 |], 2
+                [| 0; 1; 5; 4 |], 3
+                [| 1; 4; 0; 5 |], 4
+            |]
+            test <@ set (RTree.searchInside (Rect.point [| 0; 1; 5; 4 |]) tree) = set [ 1; 3 ] @>
+
+        testCase "Finds entry when searched by Rect.fromOrigin" <| fun () ->
+            let tree = createFromPoints 2 [|
+                [| 0; 1; 5; 4 |], 1
+                [| 1; 9; 8; 2 |], 2
+                [| 0; 1; 5; 4 |], 3
+                [| 1; 4; 0; 5 |], 4
+            |]
+            test <@ set (RTree.searchInside (Rect.fromOriginToPoint [| 1; 4; 6; 5 |]) tree) = set [ 1; 3; 4 ] @>
+
+        testPropertyWithConfig withGen "Searching with wrapped finds all entries" <|
+            fun ((PointEntries entries): PointEntries<int, int>) ->
+                let tree = createFromPoints 32 entries
+                let wrapped = Rect.wrapAll (entries |> Array.map (fst >> Rect.point))
+                test <@ set (RTree.searchInside wrapped tree) = set (entries |> Array.map snd) @>
+
+        testPropertyWithConfig withGen "Searching containers by intersection finds all entries" <|
+            fun ((RectEntries entries): RectEntries<int, int>) ->
+                let tree = create 32 entries
+                let intersection = Rect.intersectionAll (entries |> Array.map fst)
+                test <@ set (RTree.searchContainment intersection tree) = set (entries |> Array.map snd) @>
+    ]
+
 [<Tests>]
 let tests =
     testList "RTree" [
@@ -82,62 +136,14 @@ let tests =
                 test <@ Rect.intersects rect rect @>
 
             testPropertyWithConfig withGen "Contains center" <| fun (rect: Rect<int>) ->
-                test <@ rect |> Rect.contains (Rect.createPoint (Rect.center rect)) @>
+                test <@ rect |> Rect.contains (Rect.point (Rect.center rect)) @>
 
             testPropertyWithConfig withGen "Created from origin contains origin" <| 
                 fun ((NonEmptyArray point): NonEmptyArray<int>) ->
-                    test <@ Rect.createFromOrigin point |> Rect.contains (Rect.createOrigin point.Length) @>
+                    test <@ Rect.fromOriginToPoint point |> Rect.contains (Rect.origin point.Length) @>
         ]
         testList "RTree" [
-            testPropertyWithConfig withGen "Can find every entry when searched by point" <| 
-                fun ((PointEntries entries): PointEntries<int, int>) ->
-                    let tree = RTree.createFromPoints 32 entries
-                    for (point, value) in entries do
-                        test <@ RTree.search (Rect.createPoint point) tree |> ImmArray.contains value @>
-
-            testPropertyWithConfig withGen "Can find every entry when searched using searchContainers by point" <| 
-                fun ((PointEntries entries): PointEntries<int, int>) ->
-                    let tree = RTree.createFromPoints 32 entries
-                    for (point, value) in entries do
-                        test <@ RTree.searchContainers (Rect.createPoint point) tree |> ImmArray.contains value @>
-
-            testPropertyWithConfig withGen "Can find every entry using searchContainers by its center point" <|
-                fun ((RectEntries entries): RectEntries<int, int>) ->
-                    let tree = RTree.create 32 entries
-                    for (rect, value) in entries do
-                        test <@ 
-                            RTree.searchContainers (Rect.createPoint (Rect.center rect)) tree
-                            |> ImmArray.contains value
-                        @>
-
-            testCase "Can store and find multiple entries at the same point" <| fun () ->
-                let tree = RTree.createFromPoints 2 [|
-                    [| 0; 1; 5; 4 |], 1
-                    [| 1; 9; 8; 2 |], 2
-                    [| 0; 1; 5; 4 |], 3
-                    [| 1; 4; 0; 5 |], 4
-                |]
-                test <@ set (RTree.search (Rect.createPoint [| 0; 1; 5; 4 |]) tree) = set [ 1; 3 ] @>
-
-            testCase "Finds entry when searched by Rect.fromOrigin" <| fun () ->
-                let tree = RTree.createFromPoints 2 [|
-                    [| 0; 1; 5; 4 |], 1
-                    [| 1; 9; 8; 2 |], 2
-                    [| 0; 1; 5; 4 |], 3
-                    [| 1; 4; 0; 5 |], 4
-                |]
-                test <@ set (RTree.search (Rect.createFromOrigin [| 1; 4; 6; 5 |]) tree) = set [ 1; 3; 4 ] @>
-
-            testPropertyWithConfig withGen "Searching with wrapped finds all entries" <|
-                fun ((PointEntries entries): PointEntries<int, int>) ->
-                    let tree = RTree.createFromPoints 32 entries
-                    let wrapped = Rect.wrapAll (entries |> Array.map (fst >> Rect.createPoint))
-                    test <@ set (RTree.search wrapped tree) = set (entries |> Array.map snd) @>
-
-            testPropertyWithConfig withGen "Searching containers by intersection finds all entries" <|
-                fun ((RectEntries entries): RectEntries<int, int>) ->
-                    let tree = RTree.create 32 entries
-                    let intersection = Rect.intersectionAll (entries |> Array.map fst)
-                    test <@ set (RTree.searchContainers intersection tree) = set (entries |> Array.map snd) @>
+            rTreeTests "createInOrder" RTree.createInOrder RTree.createFromPointsInOrder
+            rTreeTests "createSorted" RTree.createSorted RTree.createFromPointsSorted
         ]
     ]

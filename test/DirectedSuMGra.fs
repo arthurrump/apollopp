@@ -50,4 +50,9 @@ let tests =
             ]
 
             test <@ set (SubgraphSearch.searchSimpleGraph target query) = expected @>
+
+        testProperty "All generated subgraphs have at least one mapping" <| fun (target: Graph<int, int>) ->
+            Prop.forAll (Gen.subListOf target |> Gen.map set |> Arb.fromGen) <| fun (query: Graph<int, int>) ->
+                not (Set.isEmpty target || Set.isEmpty query) ==>
+                    lazy test <@ not (Seq.isEmpty (SubgraphSearch.searchSimpleGraph target query)) @>
     ]

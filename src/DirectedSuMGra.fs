@@ -211,7 +211,20 @@ module SubgraphSearch =
         // matched query node) to find the set of all target node candidates
         // that fulfill the requirements regarding connections to the currently
         // mapped part of the graph.
-        |> Set.intersectMany
+        // Note: Just Set.intersectMany doesn't work, because if there are no
+        // adjacent nodes (can happen with a disconnected query), then this
+        // fails.
+        |> fun s ->
+            if Seq.isEmpty s then
+                // If there are no adjacent nodes, we are in basically the same
+                // place as we were at the start, so we can also make use of the
+                // SignatureIndex again.
+                let candidates = set (SignatureIndex.search query.FeatureMap.[currentQueryNode] target.SignatureIndex)
+                // But we do need to filter out all of the already mapped nodes,
+                // to avoid mapping them twice.
+                Set.difference candidates (set (Map.values mapping))
+            else
+                Set.intersectMany s
         // TODO: We can further prune the solution space by predicting if future
         // growth of the mapping is possible, by checking if the vertex
         // signature of the current query node is contained in the signature of

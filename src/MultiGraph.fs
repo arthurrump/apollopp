@@ -16,6 +16,14 @@ module MultiGraph =
     let fromIntGraph (graph: Graph<int, int>) : MultiGraph =
         let nodeCount = graph |> Graph.nodes |> Set.count
         Array2D.init nodeCount nodeCount (fun from to' -> Graph.edgesFromTo from to' graph)
+
+    let toIntGraph (graph: MultiGraph) : Graph<int, int> =
+        set <| seq {
+            for from in 0 .. Array2D.length1 graph - 1 do
+                for to' in 0 .. Array2D.length1 graph - 1 do
+                    for edge in graph.[from, to'] do
+                        yield from, edge, to'
+        }
     
     let fromGraph (graph: Graph<'node, 'edge>) : MultiGraph * ImmutableArray<'node> * ImmutableArray<'edge> * Map<'edge, int> =
         let edgeArray = graph |> Graph.edges |> ImmutableArray.ToImmutableArray
@@ -27,6 +35,14 @@ module MultiGraph =
                 |> Set.map (fun edge -> edgeMap.[edge]) 
             )
         graph, nodeArray, edgeArray, edgeMap
+
+    let toGraph (nodeArray: ImmutableArray<'node>) (edgeArray: ImmutableArray<'edge>) (graph: MultiGraph) : Graph<'node, 'edge> =
+        set <| seq {
+            for from in 0 .. Array2D.length1 graph - 1 do
+                for to' in 0 .. Array2D.length1 graph - 1 do
+                    for edge in graph.[from, to'] do
+                        yield nodeArray.[from], edgeArray.[edge], nodeArray.[to']
+        }
 
     let fromGraphWithEdgeMap (edgeMap: Map<'edge, int>) (graph: Graph<'node, 'edge>) : MultiGraph * ImmutableArray<'node> =
         let nodeArray = graph |> Graph.nodes |> ImmutableArray.ToImmutableArray

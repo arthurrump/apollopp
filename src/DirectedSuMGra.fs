@@ -1,5 +1,8 @@
 module DirectedSuMGra
 
+// Based on SuMGra: https://doi.org/10.1007/978-3-319-44403-1_24
+// Adapted to work on loopy directed graphs.
+
 open MultiGraph
 open RTree
 open SetTrieSetMap

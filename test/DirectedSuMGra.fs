@@ -1,8 +1,10 @@
 module Test.DirectedSuMGra
 
 open Expecto
+open FsCheck
 open Swensen.Unquote
 
+open DirectedSuMGra
 open Graph
 open MultiGraph
 
@@ -35,7 +37,7 @@ let tests =
                 ("t22", "private", "t22")
             ]
 
-            let testPattern = set [
+            let query = set [
                 ("p0", "class", "p0")
                 ("p1", "method", "p1")
                 ("p1", "public", "p1")
@@ -47,17 +49,5 @@ let tests =
                 Map.ofList [ ("p0", "t2"); ("p1", "t21") ]
             ]
 
-            let target', targetNodes, _, targetEdgeMap = MultiGraph.fromGraph target
-            let pattern', patternNodes = MultiGraph.fromGraphWithEdgeMap targetEdgeMap testPattern
-
-            let mappings = 
-                DirectedSuMGra.querySimple pattern' target'
-                |> Seq.map (
-                    Map.toSeq 
-                    >> Seq.map (fun (p, t) -> patternNodes.[p], targetNodes.[t]) 
-                    >> Map.ofSeq
-                )
-                |> Set.ofSeq
-
-            test <@ mappings = expected @>
+            test <@ set (SubgraphSearch.searchSimpleGraph target query) = expected @>
     ]

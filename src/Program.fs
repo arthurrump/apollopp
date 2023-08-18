@@ -1,5 +1,6 @@
 ﻿module Apollopp
 
+open DirectedSuMGra
 open Graph
 open MultiGraph
 open System.IO
@@ -89,7 +90,7 @@ let testTarget', testTargetNodes, testTargetEdges, testTargetEdgeMap =
 let testPattern', testPatternNodes =
     MultiGraph.fromGraphWithEdgeMap testTargetEdgeMap pattern
 
-let mappings = DirectedSuMGra.querySimple testPattern' testTarget'
+let mappings = SubgraphSearch.searchSimple testTarget' testPattern'
 
 printfn "%A" mappings
 

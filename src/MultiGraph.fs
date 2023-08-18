@@ -6,7 +6,8 @@ open System.Collections.Immutable
 type MultiGraph = Set<int>[,]
 type Signature =
     { Incoming: ImmutableArray<Set<int>>
-      Outgoing: ImmutableArray<Set<int>> }
+      Outgoing: ImmutableArray<Set<int>>
+      Loops: Set<int> }
 
 module MultiGraph =
     let initEmpty (nodeCount: int) : MultiGraph = 
@@ -44,16 +45,21 @@ module MultiGraph =
     let adjacent (node: int) (graph: MultiGraph) =
         let filterConnections =
             Array.mapi (fun to' edges -> to', edges) 
-            >> Array.choose (fun (to', edges) -> if Set.isEmpty edges then None else Some to')
+            >> Array.choose (fun (to', edges) -> if Set.isEmpty edges || to' = node then None else Some to')
         Set.union 
             (set (filterConnections graph.[node, *]))
             (set (filterConnections graph.[*, node]))
 
     let signature (graph: MultiGraph) (node: int) : Signature =
-        { Incoming = 
-            graph.[*, node] |> Seq.filter (not << Set.isEmpty) |> ImmutableArray.ToImmutableArray
-          Outgoing = 
-            graph.[node, *] |> Seq.filter (not << Set.isEmpty) |> ImmutableArray.ToImmutableArray }
+        let filterEdges edges =
+            edges
+            |> Seq.indexed
+            |> Seq.filter (fun (i, edges) -> not (Set.isEmpty edges || i = node))
+            |> Seq.map snd
+            |> ImmutableArray.ToImmutableArray
+        { Incoming = filterEdges graph.[*, node]
+          Outgoing = filterEdges graph.[node, *]
+          Loops = graph.[node, node] }
 
     let signatureMap (graph: MultiGraph) : ImmutableArray<Signature> =
         Seq.init (nodeCount graph) (signature graph)

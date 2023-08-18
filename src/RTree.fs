@@ -8,8 +8,11 @@ open System
 open System.Collections.Immutable
 
 module Array =
+    open Microsoft.FSharp.Core.LanguagePrimitives
+
     let inline min2 a b = Array.map2 min a b
     let inline max2 a b = Array.map2 max a b
+    let inline avg2 a b = Array.map2 (fun a b -> (a + b) / (GenericOne + GenericOne)) a b
     let inline add a b = Array.map2 (fun a b -> a + b) a b
     let inline sub a b = Array.map2 (fun a b -> a - b) a b
 
@@ -55,6 +58,9 @@ module Rect =
     let dimensions (rect: Rect<'t>) : int =
         rect.Low.Length
 
+    let center (rect: Rect<'t>) : 't[] =
+        Array.avg2 rect.Low rect.High
+
     let wrap (rect1: Rect<'t>) (rect2: Rect<'t>) : Rect<'t> =
         { Low = Array.min2 rect1.Low rect2.Low
           High = Array.max2 rect1.High rect2.High }
@@ -62,11 +68,23 @@ module Rect =
     let wrapAll (rects: #seq<Rect<'t>>) : Rect<'t> = 
         Seq.reduce wrap rects
 
+    let intersection (rect1: Rect<'t>) (rect2: Rect<'t>) : Rect<'t> =
+        { Low = Array.max2 rect1.Low rect2.Low
+          High = Array.min2 rect1.High rect2.High }
+
+    let intersectionAll (rects: #seq<Rect<'t>>) : Rect<'t> =
+        Seq.reduce intersection rects
+
     let intersects (rect1: Rect<'t>) (rect2: Rect<'t>) : bool =
         not (Array.gtAll rect1.Low rect2.High || Array.ltAll rect1.High rect2.Low)
 
+    /// <summary>
+    /// Evaluates to true if the area of the first rectangle is fully contained
+    /// in the second.
+    /// </summary>
+    /// <returns>True if <c>rect2</c> contains <c>rect1</c>.</returns>
     let contains (rect1: Rect<'t>) (rect2: Rect<'t>) : bool =
-        Array.lteAll rect1.Low rect2.Low && Array.gteAll rect1.High rect2.High
+        Array.lteAll rect2.Low rect1.Low && Array.gteAll rect2.High rect1.High
 
     let inline area (rect: Rect<'t>) : 't =
         Array.sub rect.High rect.Low |> Array.reduce (fun a b -> a * b)
@@ -95,23 +113,23 @@ module RTree =
             |> Array.chunkBySize maxCapacity
             |> Array.map createBranch
             |> createUpper maxCapacity
-
-    let create (maxCapacity: int) (entries: ('k[] * 'v)[]) : RTree<'k, 'v> =
+    
+    let create (maxCapacity: int) (entries: (Rect<'k> * 'v)[]) : RTree<'k, 'v> =
         entries
-        |> Array.map (fun (key, value) -> Leaf(Rect.createPoint key, value))
+        |> Array.map Leaf
         |> createUpper maxCapacity
 
-    let inline createSorted (maxCapacity: int) (entries: ('k[] * 'v)[]) : RTree<'k, 'v> =
+    let createFromPoints (maxCapacity: int) (entries: ('k[] * 'v)[]) : RTree<'k, 'v> =
         entries
-        // Sort keys by "distance" from origin (works and might help if only positive coordinates)
-        |> Array.sortBy (fun (key, _) -> Array.sum key)
+        |> Array.map (fun (key, value) -> Rect.createPoint key, value)
         |> create maxCapacity
 
+    /// Search for all values whose key is contained in the rectangle
     let search (rect: Rect<'k>) (node: RTree<'k, 'v>) : ImmutableArray<'v> =
         let rec loop (results: ResizeArray<'v>) (rect: Rect<'k>) = function
-            | Leaf(key, value) when Rect.contains rect key ->
+            | Leaf (key, value) when rect |> Rect.contains key ->
                 results.Add(value)
-            | Branch(key, entries) when Rect.intersects rect key ->
+            | Branch (key, entries) when Rect.intersects rect key ->
                 for entry in entries do
                     loop results rect entry
             | _ -> 
@@ -119,4 +137,17 @@ module RTree =
         let results = ResizeArray()
         loop results rect node
         ImmutableArray.ToImmutableArray results
-        
+    
+    /// Search for all values that contain the given rectangle
+    let searchContainers (rect: Rect<'k>) (node: RTree<'k, 'v>) : ImmutableArray<'v> =
+        let rec loop (results: ResizeArray<'v>) (rect: Rect<'k>) = function
+            | Leaf (key, value) when key |> Rect.contains rect ->
+                results.Add(value)
+            | Branch (key, entries) when key |> Rect.contains rect ->
+                for entry in entries do
+                    loop results rect entry
+            | _ ->
+                ()
+        let results = ResizeArray()
+        loop results rect node
+        ImmutableArray.ToImmutableArray results

@@ -41,6 +41,20 @@ module MultiGraph =
                         yield nodeArray.[from], edge, nodeArray.[to']
         }
 
+    let extendWithGraph (extension: Graph<'node, 'edge>) (graph: MultiGraph<'edge>, nodeArray: ImmutableArray<'node>) : MultiGraph<'edge> * ImmutableArray<'node> =
+        let originalNodeCount = nodeArray.Length
+        let newNodes = Set.difference (Graph.nodes extension) (set nodeArray)
+        let nodeArray = nodeArray.AddRange newNodes
+        let graph =
+            Array2D.init nodeArray.Length nodeArray.Length (fun from to' ->
+                let existing =
+                    if from < originalNodeCount && to' < originalNodeCount 
+                    then graph.[from, to']
+                    else Set.empty
+                Set.union existing (Graph.edgesFromTo nodeArray.[from] nodeArray.[to'] extension)
+            )
+        graph, nodeArray
+
     let nodeCount : MultiGraph<'edge> -> int = Array2D.length1
 
     let getMultiEdge (from: int) (to': int) (graph: MultiGraph<'edge>) : Set<'edge> =

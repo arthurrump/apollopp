@@ -1,4 +1,4 @@
-module DirectedSuMGra
+namespace DirectedSuMGra
 
 // Based on SuMGra: https://doi.org/10.1007/978-3-319-44403-1_24
 // Adapted to work on loopy directed graphs.
@@ -28,7 +28,7 @@ type SignatureIndex = RTree<int, int>
 module SignatureIndex =
     /// Turn a node signature into a set of features to use as the key in the
     /// SignatureIndex
-    let features (signature: Signature) : int[] =
+    let features (signature: Signature<'edge>) : int[] =
         [| // f1 Cardinality of vertex signature
            // signature.Incoming.Length + signature.Outgoing.Length
            // f1a Cardinality of incoming vertex signature
@@ -54,7 +54,7 @@ module SignatureIndex =
            Seq.append signature.Incoming signature.Outgoing |> Seq.map Set.count |> Seq.maxOrZero |]
 
     /// Create a SignatureIndex for a graph based on its signature map
-    let create (signatureMap: ImmutableArray<Signature>) : SignatureIndex =
+    let create (signatureMap: ImmutableArray<Signature<'edge>>) : SignatureIndex =
         signatureMap
         |> Seq.mapi (fun i signature -> Rect.fromOriginToPoint (features signature), i)
         |> Seq.toArray
@@ -66,15 +66,16 @@ module SignatureIndex =
 
 /// An index of neighbouring nodes for a single node in the graph, keyed by the
 /// set of multiedge labels going to or coming in from the neighbouring node
-type NeighborhoodNodeIndex = 
-    { IncomingIndex: SetTrieSetMap<int, int>
-      OutgoingIndex: SetTrieSetMap<int, int> }
+type NeighborhoodNodeIndex<'edge when 'edge : comparison> = 
+    { IncomingIndex: SetTrieSetMap<'edge, int>
+      OutgoingIndex: SetTrieSetMap<'edge, int> }
 /// An index of neighbouring nodes for all nodes in the graph
-type NeighborhoodIndex = ImmutableArray<NeighborhoodNodeIndex>
+type NeighborhoodIndex<'edge when 'edge : comparison> = 
+    ImmutableArray<NeighborhoodNodeIndex<'edge>>
 
 module NeighborhoodIndex =
     /// Create the NeighborhoodIndex for a graph
-    let create (graph: MultiGraph) : NeighborhoodIndex =
+    let create (graph: MultiGraph<'edge>) : NeighborhoodIndex<'edge> =
         let createEdgesIndex node edges =
             edges
             |> Array.mapi (fun neighbor edges -> edges, neighbor)
@@ -91,7 +92,7 @@ module NeighborhoodIndex =
 
     /// Search the NeighborhoodIndex for nodes that have a superset of the given
     /// incoming and outgoing edges (from the perspective of the given node)
-    let search (node: int) (incomingEdges: Set<int>) (outgoingEdges: Set<int>) (neighborhoodIndex: NeighborhoodIndex) : Set<int> =
+    let search (node: int) (incomingEdges: Set<'edge>) (outgoingEdges: Set<'edge>) (neighborhoodIndex: NeighborhoodIndex<'edge>) : Set<int> =
         // We query the neighborhood index for nodes that have a *superset* of
         // the given incoming and outgoing edges from the node. If the node
         // we're looking for does not have incoming or outgoing edges from the
@@ -121,20 +122,20 @@ module NeighborhoodIndex =
 
 /// Container for all representations of the query graph used by the subgraph
 /// matching algorithm
-type Query =
+type Query<'edge when 'edge : comparison> =
     { /// Signatures for each node in the query graph
-      SignatureMap: ImmutableArray<Signature>
+      SignatureMap: ImmutableArray<Signature<'edge>>
       /// Feature vectors for each node in the query graph
       FeatureMap: ImmutableArray<int[]>
       /// Order in which the nodes of the query graph should be matched
       Order: int list
       /// The query graph itself
-      Graph: MultiGraph }
+      Graph: MultiGraph<'edge> }
 
 module Query =
     /// Determine the order in which the nodes of the query graph should be
     /// matched, returning a list of node indices in that order
-    let private getOrder (query: MultiGraph) =
+    let private getOrder (query: MultiGraph<'edge>) =
         let r1 node = 
             let signature = MultiGraph.signature query node
             signature.Incoming.Length + signature.Outgoing.Length
@@ -162,7 +163,7 @@ module Query =
         order |> List.ofArray
 
     /// Build all required representations from the query graph
-    let fromGraph (query: MultiGraph) =
+    let fromGraph (query: MultiGraph<'edge>) =
         let signatureMap = MultiGraph.signatureMap query
         { SignatureMap = signatureMap
           FeatureMap = signatureMap |> Seq.map SignatureIndex.features |> ImmutableArray.ToImmutableArray
@@ -171,14 +172,14 @@ module Query =
 
 /// Container for all representations of the target graph used by the subgraph
 /// matching algorithm
-type Target =
+type Target<'edge when 'edge : comparison> =
     { SignatureIndex: SignatureIndex
-      NeighborhoodIndex: NeighborhoodIndex
-      SignatureMap: ImmutableArray<Signature> }
+      NeighborhoodIndex: NeighborhoodIndex<'edge>
+      SignatureMap: ImmutableArray<Signature<'edge>> }
 
 module Target =
     /// Build all required representations from the target graph
-    let fromGraph (graph: MultiGraph) =
+    let fromGraph (graph: MultiGraph<'edge>) =
         { SignatureIndex = SignatureIndex.create (MultiGraph.signatureMap graph)
           NeighborhoodIndex = NeighborhoodIndex.create graph
           SignatureMap = MultiGraph.signatureMap graph }
@@ -186,7 +187,7 @@ module Target =
 module SubgraphSearch =
     /// Find all target nodes that are joinable with the already mapped query
     /// and thus are candidates to match with the current query node
-    let private findJoinable (target: Target) (query: Query) (currentQueryNode: int) (mapping: Map<int, int>) : Set<int> =
+    let private findJoinable (target: Target<'edge>) (query: Query<'edge>) (currentQueryNode: int) (mapping: Map<int, int>) : Set<int> =
         // Find all adjacent nodes of the current (to-be-matched) query node and
         MultiGraph.adjacent currentQueryNode query.Graph
         // filter to those that are already mapped (and include the mapped target node).
@@ -244,7 +245,7 @@ module SubgraphSearch =
     /// Recursively extend the given mapping until all query nodes in the
     /// nextQueryNodes list are matched, returning the sequence of all valid
     /// mappings
-    let rec extendMapping (target: Target) (query: Query) (nextQueryNodes: int list) (mapping: Map<int, int>) : Map<int, int> seq =
+    let rec extendMapping (target: Target<'edge>) (query: Query<'edge>) (nextQueryNodes: int list) (mapping: Map<int, int>) : Map<int, int> seq =
         match nextQueryNodes with
         | currentQueryNode :: nextQueryNodes ->
             let candidateNodes = findJoinable target query currentQueryNode mapping
@@ -258,7 +259,7 @@ module SubgraphSearch =
 
     /// Search for mappings based on target and query graph representations,
     /// returning the sequence of all valid mappings
-    let search (target: Target) (query: Query) =
+    let search (target: Target<'edge>) (query: Query<'edge>) =
         match query.Order with
         | currentQueryNode :: nextQueryNodes ->
             let initCandidateNodes = SignatureIndex.search query.FeatureMap.[currentQueryNode] target.SignatureIndex
@@ -272,7 +273,7 @@ module SubgraphSearch =
 
     /// Search for mappings of the query graph to the target graph, returning
     /// the sequence of all valid mappings
-    let searchSimple (targetGraph: MultiGraph) (queryGraph: MultiGraph) =
+    let searchSimple (targetGraph: MultiGraph<'edge>) (queryGraph: MultiGraph<'edge>) =
         let target = Target.fromGraph targetGraph
         let query = Query.fromGraph queryGraph
         search target query
@@ -281,8 +282,8 @@ module SubgraphSearch =
     /// edgeset graph representation, returning the sequence of all valid
     /// mappings
     let searchSimpleGraph (targetGraph: Graph<'node, 'edge>) (queryGraph: Graph<'node, 'edge>) =
-        let target, targetNodes, _, targetEdgeMap = MultiGraph.fromGraph targetGraph
-        let query, queryNodes = MultiGraph.fromGraphWithEdgeMap targetEdgeMap queryGraph
+        let target, targetNodes = MultiGraph.fromGraph targetGraph
+        let query, queryNodes = MultiGraph.fromGraph queryGraph
         searchSimple target query
         |> Seq.map (
             Map.toSeq

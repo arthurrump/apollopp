@@ -1,4 +1,4 @@
-﻿module Apollopp
+module Apollopp
 
 open DirectedSuMGra
 open Graph
@@ -84,11 +84,11 @@ let pattern: TypeGraph<int> =
 
 
 
-let testTarget', testTargetNodes, testTargetEdges, testTargetEdgeMap = 
+let testTarget', testTargetNodes = 
     MultiGraph.fromGraph target
 
 let testPattern', testPatternNodes =
-    MultiGraph.fromGraphWithEdgeMap testTargetEdgeMap pattern
+    MultiGraph.fromGraph pattern
 
 let mappings = SubgraphSearch.searchSimple testTarget' testPattern'
 

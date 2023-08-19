@@ -175,16 +175,26 @@ module Query =
 type Target<'edge when 'edge : comparison> =
     { SignatureIndex: SignatureIndex
       NeighborhoodIndex: NeighborhoodIndex<'edge>
-      SignatureMap: ImmutableArray<Signature<'edge>> }
+      SignatureMap: ImmutableArray<Signature<'edge>>
+      Graph: MultiGraph<'edge> }
 
 module Target =
     /// Build all required representations from the target graph
-    let fromGraph (graph: MultiGraph<'edge>) =
-        { SignatureIndex = SignatureIndex.create (MultiGraph.signatureMap graph)
-          NeighborhoodIndex = NeighborhoodIndex.create graph
-          SignatureMap = MultiGraph.signatureMap graph }
+    let fromGraph (target: MultiGraph<'edge>) =
+        { SignatureIndex = SignatureIndex.create (MultiGraph.signatureMap target)
+          NeighborhoodIndex = NeighborhoodIndex.create target
+          SignatureMap = MultiGraph.signatureMap target
+          Graph = target }
 
 module SubgraphSearch =
+    /// Select initial candidates using the SignatureIndex and verify that the
+    /// loops are compatible
+    let private selectInitialCandidates (target: Target<'edge>) (query: Query<'edge>) (currentQueryNode: int) =
+        SignatureIndex.search query.FeatureMap.[currentQueryNode] target.SignatureIndex
+        |> Seq.filter (fun candidateTargetNode ->
+            Set.isSuperset target.SignatureMap.[candidateTargetNode].Loops query.SignatureMap.[currentQueryNode].Loops
+        )
+
     /// Find all target nodes that are joinable with the already mapped query
     /// and thus are candidates to match with the current query node
     let private findJoinable (target: Target<'edge>) (query: Query<'edge>) (currentQueryNode: int) (mapping: Map<int, int>) : Set<int> =
@@ -218,9 +228,8 @@ module SubgraphSearch =
         |> fun s ->
             if Seq.isEmpty s then
                 // If there are no adjacent nodes, we are in basically the same
-                // place as we were at the start, so we can also make use of the
-                // SignatureIndex again.
-                let candidates = set (SignatureIndex.search query.FeatureMap.[currentQueryNode] target.SignatureIndex)
+                // place as we were at the start.
+                let candidates = set (selectInitialCandidates target query currentQueryNode)
                 // But we do need to filter out all of the already mapped nodes,
                 // to avoid mapping them twice.
                 Set.difference candidates (set (Map.values mapping))
@@ -262,7 +271,7 @@ module SubgraphSearch =
     let search (target: Target<'edge>) (query: Query<'edge>) =
         match query.Order with
         | currentQueryNode :: nextQueryNodes ->
-            let initCandidateNodes = SignatureIndex.search query.FeatureMap.[currentQueryNode] target.SignatureIndex
+            let initCandidateNodes = selectInitialCandidates target query currentQueryNode
             seq {
                 for candidateNode in initCandidateNodes do
                     let mapping = Map.singleton currentQueryNode candidateNode
@@ -270,6 +279,13 @@ module SubgraphSearch =
             }
         | [] ->
             Seq.empty
+
+    let private verifyN (count: int) (targetGraph: MultiGraph<'edge>) (queryGraph: MultiGraph<'edge>) (mapping: Map<int, int>) =
+        Seq.allPairs [ 0 .. count - 1 ] [ 0 .. count - 1 ]
+        |> Seq.forall (fun (qFrom, qTo) -> Set.isSubset queryGraph.[qFrom, qTo] targetGraph.[mapping.[qFrom], mapping.[qTo]])
+
+    let verify (targetGraph: MultiGraph<'edge>) (queryGraph: MultiGraph<'edge>) (mapping: Map<int, int>) =
+        verifyN (MultiGraph.nodeCount queryGraph) targetGraph queryGraph mapping
 
     /// Search for mappings of the query graph to the target graph, returning
     /// the sequence of all valid mappings

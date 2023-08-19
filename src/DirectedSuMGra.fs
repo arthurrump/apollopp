@@ -133,42 +133,74 @@ type Query<'edge when 'edge : comparison> =
       Graph: MultiGraph<'edge> }
 
 module Query =
-    /// Determine the order in which the nodes of the query graph should be
-    /// matched, returning a list of node indices in that order
-    let private getOrder (query: MultiGraph<'edge>) =
-        let r1 node = 
+    module private Order =
+        let private r1 query node = 
             let signature = MultiGraph.signature query node
             signature.Incoming.Length + signature.Outgoing.Length
-        let r2 ordered node = 
+        let private r2 query ordered node = 
             Set.intersect ordered (MultiGraph.adjacent node query)
             |> Set.count
-        
-        let nodeCount = MultiGraph.nodeCount query
-        let order = Array.zeroCreate nodeCount
-        order.[0] <- [ 0 .. nodeCount - 1 ] |> Seq.maxBy r1
-        let orderedSet = Set.singleton order.[0]
-        let unorderedSet = set [ 0 .. nodeCount - 1 ] - orderedSet
-        
-        Seq.init (nodeCount - 1) (fun i -> i + 1)
-        |> Seq.fold (fun (orderedSet, unorderedSet) i ->
-            let next = 
-                unorderedSet 
-                |> Seq.groupBy (r2 orderedSet) |> Seq.maxBy fst |> snd
-                |> Seq.maxBy r1
-            order.[i] <- next
-            Set.add next orderedSet, Set.remove next unorderedSet
-        ) (orderedSet, unorderedSet)
-        |> ignore
 
-        order |> List.ofArray
+        let private buildOrder (query, orderedSet, unorderedSet, startIndex) (order: int[]) =
+            Seq.init (Set.count unorderedSet) (fun i -> i + startIndex)
+            |> Seq.fold (fun (orderedSet, unorderedSet) i ->
+                let next = 
+                    unorderedSet 
+                    |> Seq.groupBy (r2 query orderedSet) |> Seq.maxBy fst |> snd
+                    |> Seq.maxBy (r1 query)
+                order.[i] <- next
+                Set.add next orderedSet, Set.remove next unorderedSet
+            ) (orderedSet, unorderedSet)
+            |> ignore
+
+        /// Determine the order in which the nodes of the query graph should be
+        /// matched, returning a list of node indices in that order
+        let getOrder (query: MultiGraph<'edge>) =
+            let nodeCount = MultiGraph.nodeCount query
+            let order = Array.zeroCreate nodeCount
+            order.[0] <- [ 0 .. nodeCount - 1 ] |> Seq.maxBy (r1 query)
+            let orderedSet = Set.singleton order.[0]
+            let unorderedSet = set [ 0 .. nodeCount - 1 ] - orderedSet
+            
+            buildOrder (query, orderedSet, unorderedSet, 1) order
+
+            order |> List.ofArray
+
+        /// Extend the given order for an extended query graph, keeping the
+        /// order of the original nodes intact, such that it can be used to
+        /// extend a mapping created from the base graph
+        let extendOrder (baseOrder: int list) (extendedQuery: MultiGraph<'edge>) =
+            let nodeCount = MultiGraph.nodeCount extendedQuery
+            let baseNodeCount = List.length baseOrder
+            if nodeCount < List.length baseOrder then
+                invalidArg "extendedQuery" "The extended query graph must not have less nodes than the base query graph"
+            elif nodeCount = List.length baseOrder then
+                baseOrder
+            else
+                let order = Array.zeroCreate nodeCount
+                baseOrder |> List.iteri (fun i node -> order.[i] <- node)
+                let unorderedSet = set [ baseNodeCount .. nodeCount - 1 ]
+                buildOrder (extendedQuery, set baseOrder, unorderedSet, baseNodeCount) order
+                order |> List.ofArray
 
     /// Build all required representations from the query graph
     let fromGraph (query: MultiGraph<'edge>) =
         let signatureMap = MultiGraph.signatureMap query
         { SignatureMap = signatureMap
           FeatureMap = signatureMap |> Seq.map SignatureIndex.features |> ImmutableArray.ToImmutableArray
-          Order = getOrder query
+          Order = Order.getOrder query
           Graph = query }
+
+    /// Extend an existing query with an extended query graph, updating the
+    /// indices, but keeping the order of the original nodes intact, such that
+    /// this query can be used to extend a mapping created with the base query
+    /// graph
+    let extendWithGraph (extended: MultiGraph<'edge>) (query: Query<'edge>) =
+        let signatureMap = MultiGraph.signatureMap extended
+        { SignatureMap = signatureMap
+          FeatureMap = signatureMap |> Seq.map SignatureIndex.features |> ImmutableArray.ToImmutableArray
+          Order = Order.extendOrder query.Order extended
+          Graph = extended }
 
 /// Container for all representations of the target graph used by the subgraph
 /// matching algorithm
@@ -254,7 +286,7 @@ module SubgraphSearch =
     /// Recursively extend the given mapping until all query nodes in the
     /// nextQueryNodes list are matched, returning the sequence of all valid
     /// mappings
-    let rec extendMapping (target: Target<'edge>) (query: Query<'edge>) (nextQueryNodes: int list) (mapping: Map<int, int>) : Map<int, int> seq =
+    let rec private extendMapping (target: Target<'edge>) (query: Query<'edge>) (nextQueryNodes: int list) (mapping: Map<int, int>) : Map<int, int> seq =
         match nextQueryNodes with
         | currentQueryNode :: nextQueryNodes ->
             let candidateNodes = findJoinable target query currentQueryNode mapping
@@ -286,6 +318,18 @@ module SubgraphSearch =
 
     let verify (targetGraph: MultiGraph<'edge>) (queryGraph: MultiGraph<'edge>) (mapping: Map<int, int>) =
         verifyN (MultiGraph.nodeCount queryGraph) targetGraph queryGraph mapping
+
+    /// Search for extended mappings based using extended query graph
+    /// representations. Note: assumes that the *n* already mapped nodes are the
+    /// first *n* nodes in the query node ordering. This is the case if the
+    /// extended query is built using <c>Query.extendWithGraph</c>, extending
+    /// the query that was used to find the mapping.
+    let searchExtended (target: Target<'edge>) (extendedQuery: Query<'edge>) (mapping: Map<int, int>) =
+        if verifyN (Map.count mapping) target.Graph extendedQuery.Graph mapping then
+            let nextQueryNodes = extendedQuery.Order |> List.skip (Map.count mapping)
+            extendMapping target extendedQuery nextQueryNodes mapping
+        else
+            Seq.empty
 
     /// Search for mappings of the query graph to the target graph, returning
     /// the sequence of all valid mappings

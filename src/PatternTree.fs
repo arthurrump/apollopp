@@ -49,4 +49,11 @@ module PatternTree =
             }
         search target Map.empty tree
 
-    
+    let searchSimple (targetGraph: Graph<'tnode, 'edge>) (tree: PatternTree<Graph<'pnode, 'edge>>) : (Verdict * Map<'pnode, 'tnode>) seq =
+        let targetMg, targetNodeArray = MultiGraph.fromGraph targetGraph
+        let target = Target.fromGraph targetMg
+        let tree = tree |> buildMultigraphs |> buildQueries
+        search target tree
+        |> Seq.map (fun (verdict, mapping, queryNodeArray) ->
+            verdict, mapping |> Seq.map (fun (KeyValue (key, value)) -> queryNodeArray.[key], targetNodeArray.[value]) |> Map.ofSeq
+        )

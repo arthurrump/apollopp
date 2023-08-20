@@ -9,6 +9,7 @@
     <Compile Include="RTree.fs" />
     <Compile Include="SetTrieSetMap.fs" />
     <Compile Include="DirectedSuMGra.fs" />
+    <Compile Include="PatternTree.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
   <ItemGroup>

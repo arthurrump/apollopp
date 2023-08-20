@@ -124,5 +124,11 @@ let tests =
                             |> Seq.collect (SubgraphSearch.searchExtended target queryExt)
                         
                         test <@ set resultsExtended = set resultsDirect @>
+
+            testProperty "Extending an empty map gives the same results as a normal search" <| fun (target: Graph<int, int>) (query: Graph<int, int>) ->
+                not (Set.isEmpty target || Set.isEmpty query) ==> lazy
+                    let target = Target.fromGraph (MultiGraph.fromGraph target |> fst)
+                    let query = Query.fromGraph (MultiGraph.fromGraph query |> fst)
+                    test <@ set (SubgraphSearch.search target query) = set (SubgraphSearch.searchExtended target query Map.empty) @>
         ]
     ]

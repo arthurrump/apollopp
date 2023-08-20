@@ -1,16 +1,10 @@
-module Apollopp
+﻿module Apollopp
 
 open DirectedSuMGra
 open Graph
 open MultiGraph
 open System.IO
 open Thoth.Json.Net
-
-type Verdict = Positive | Negative | Neutral
-type Pattern<'node, 'edge when 'node : comparison and 'edge : comparison> =
-    { Verdict: Verdict
-      Graph: Graph<'node, 'edge>
-      Children: Pattern<'node, 'edge> list }
 
 type TypeGraphAnnotation =
     | NameClass of nameClass: string

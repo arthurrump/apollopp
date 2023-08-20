@@ -68,6 +68,20 @@ module MultiGraph =
             (set (filterConnections graph.[node, *]))
             (set (filterConnections graph.[*, node]))
 
+    /// Returns all nodes that are adjacent to one of <c>nodes</c>, or the empty
+    /// set if <c>nodes</c> is empty
+    let allAdjacent (nodes: #seq<int>) (graph: MultiGraph<'edge>) =
+        nodes 
+        |> Seq.map (fun node -> adjacent node graph) 
+        |> Seq.fold Set.union Set.empty
+
+    let inducedGraph (nodes: #seq<int>) (graph: MultiGraph<'edge>) : Graph<int, 'edge> =
+        set <| seq {
+            for (from, to') in Seq.allPairs nodes nodes do
+                for edge in graph.[from, to'] do
+                    yield from, edge, to'
+        }
+
     let signature (graph: MultiGraph<'edge>) (node: int) : Signature<'edge> =
         let filterEdges edges =
             edges

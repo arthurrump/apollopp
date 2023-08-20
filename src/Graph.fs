@@ -61,6 +61,15 @@ module Graph =
     let inline combine (graph1: Graph<'node, 'edge>) (graph2: Graph<'node, 'edge>) : Graph<'node, 'edge> =
         Set.union graph1 graph2
 
+    let inline mapNode (f: 'anode -> 'bnode) (graph: Graph<'anode, 'edge>) : Graph<'bnode, 'edge> =
+        graph |> Set.map (fun (from, edge, to') -> f from, edge, f to')
+
+    let inline mapEdge (f: 'aedge -> 'bedge) (graph: Graph<'node, 'aedge>) : Graph<'node, 'bedge> =
+        graph |> Set.map (fun (from, edge, to') -> from, f edge, to')
+
+    let inline map (fn: 'anode -> 'bnode) (fe: 'aedge -> 'bedge) (graph: Graph<'anode, 'aedge>) : Graph<'bnode, 'bedge> =
+        graph |> Set.map (fun (from, edge, to') -> fn from, fe edge, fn to')
+
     let encoder (nodeEncoder: Encoder<'node>) (edgeEncoder: Encoder<'edge>) : Encoder<Graph<'node, 'edge>> =
         Seq.map (Encode.tuple3 nodeEncoder edgeEncoder nodeEncoder)
         >> Encode.seq

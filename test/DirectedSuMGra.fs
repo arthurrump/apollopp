@@ -125,6 +125,24 @@ let tests =
                         
                         test <@ set resultsExtended = set resultsDirect @>
 
+            testCase "search base |> searchExtended ext = search ext' with disconnected query" <| fun () ->
+                let target = set [ 0, 0, 0; 0, 2, 1 ]
+                let queryBase = set [ 0, 0, 0 ]
+                let queryExtension = set [ 2, 2, 1 ]
+                let target = Target.fromGraph (MultiGraph.fromGraph target |> fst)
+                let queryBaseMg, queryBaseNodeArray = MultiGraph.fromGraph queryBase
+                let queryBase = Query.fromGraph queryBaseMg
+                let queryExtMg, _ = MultiGraph.extendWithGraph queryExtension (queryBaseMg, queryBaseNodeArray)
+                let queryExt = Query.extendWithGraph queryExtMg queryBase
+                let queryExt' = Query.fromGraph queryExtMg
+
+                let resultsDirect = SubgraphSearch.search target queryExt'
+                let resultsExtended = 
+                    SubgraphSearch.search target queryBase 
+                    |> Seq.collect (SubgraphSearch.searchExtended target queryExt)
+                
+                test <@ set resultsExtended = set resultsDirect @>
+
             testProperty "Extending an empty map gives the same results as a normal search" <| fun (target: Graph<int, int>) (query: Graph<int, int>) ->
                 not (Set.isEmpty target || Set.isEmpty query) ==> lazy
                     let target = Target.fromGraph (MultiGraph.fromGraph target |> fst)

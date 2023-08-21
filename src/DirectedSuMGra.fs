@@ -266,7 +266,10 @@ module SubgraphSearch =
                 // to avoid mapping them twice.
                 Set.difference candidates (set (Map.values mapping))
             else
-                Set.intersectMany s
+                // When queries are disconnected, the given results may not be
+                // valid because they can include nodes that were already
+                // mapped, so filter them out
+                Set.difference (Set.intersectMany s) (set (Map.values mapping))
         // TODO: We can further prune the solution space by predicting if future
         // growth of the mapping is possible, by checking if the vertex
         // signature of the current query node is contained in the signature of

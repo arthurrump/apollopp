@@ -62,3 +62,28 @@ module SetTrieSetMap =
                 |> Set.unionMany
 
         searchSuperset (word |> Set.toList |> List.sort) trie
+
+    let searchSubset (word: Set<'k>) (trie: SetTrieSetMap<'k, 'v>) : Set<'v> =
+        let rec searchSubset word trie =
+            match word with
+            | [] ->
+                Set.empty
+            | key::rest ->
+                trie.Nodes
+                |> Seq.skipWhile (fun (KeyValue (k, _)) -> k < key)
+                |> Seq.map (fun (KeyValue (k, node)) -> 
+                    if k = key then 
+                        Set.union (searchSubset rest node) node.Values
+                    else
+                        match List.skipWhile (fun key -> key < k) rest with
+                        | key::rest ->
+                            if k = key
+                            then Set.union (searchSubset rest node) node.Values
+                            else Set.empty
+                        | [] -> 
+                            Set.empty
+                )
+                |> Set.unionMany
+        
+        searchSubset (word |> Set.toList |> List.sort) trie
+        |> Set.union trie.Values

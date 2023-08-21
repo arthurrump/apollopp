@@ -1,6 +1,7 @@
 module Test.SetTrieSetMap
 
 open Expecto
+open FsCheck
 open Swensen.Unquote
 
 open SetTrieSetMap
@@ -33,4 +34,21 @@ let tests =
                             SetTrieSetMap.searchSuperset keys trie
                                 = (entries |> List.filter (fun (k, _) -> Set.isSuperset k keys) |> List.map snd |> Set.ofList)
                         @>
+
+        testProperty "Subset search finds all entries with union of all keys" <| fun (entries: (Set<int> * int) list) ->
+            let trie = SetTrieSetMap.create entries
+            let allKeys = entries |> List.map fst |> Set.unionMany
+            test <@
+                SetTrieSetMap.searchSubset allKeys trie
+                    = (entries |> List.map snd |> Set.ofList)
+            @>
+
+        testProperty "Subset search finds all entries with subset keys" <| fun (entries: (Set<int> * int) list) ->
+            let trie = SetTrieSetMap.create entries
+            let allKeys = entries |> List.map fst |> Set.unionMany
+            Prop.forAll (Gen.subListOf allKeys |> Gen.map set |> Arb.fromGen) <| fun (keys: Set<int>) ->
+                test <@
+                    SetTrieSetMap.searchSubset keys trie
+                        = (entries |> List.filter (fun (k, _) -> Set.isSubset k keys) |> List.map snd |> Set.ofList)
+                @>
     ]

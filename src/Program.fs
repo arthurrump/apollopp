@@ -5,6 +5,7 @@ open Graph
 open MultiGraph
 open System.IO
 open Thoth.Json.Net
+open QueryBuilder
 
 type TypeGraphAnnotation =
     | NameClass of nameClass: string
@@ -65,12 +66,12 @@ module TypeGraph =
     let decoder (nodeDecoder: Decoder<'node>) : Decoder<TypeGraph<'node>> = 
         Graph.decoder nodeDecoder TypeGraphEdge.decoder
 
-let target = 
+let targetGraph = 
     match Decode.fromString (TypeGraph.decoder Decode.string) (File.ReadAllText("D:/Arthur/Desktop/tg.json")) with
     | Ok target -> target
     | Error err -> failwith err
     
-let pattern: TypeGraph<int> = 
+let queryGraph: TypeGraph<int> = 
     set [ (0, Annotated (InProjectDecl "java+class"), 0) 
           (1, Annotated (InProjectDecl "java+method"), 1)
           (1, Annotated (Modifier "public"), 1)
@@ -78,17 +79,29 @@ let pattern: TypeGraph<int> =
 
 
 
-let testTarget', testTargetNodes = 
-    MultiGraph.fromGraph target
+let targetMg, targetNodes = 
+    MultiGraph.fromGraph targetGraph
 
-let testPattern', testPatternNodes =
-    MultiGraph.fromGraph pattern
+let queryMg, queryNodes =
+    MultiGraph.fromGraph queryGraph
 
-let mappings = SubgraphSearch.searchSimple testTarget' testPattern'
+let target = Target.fromGraph targetMg
+let query = Query.fromGraph queryMg
 
-printfn "%A" mappings
+let mappings = SubgraphSearch.searchSimple targetMg queryMg |> Seq.toList
 
 for mapping in mappings do
     printfn "Mapping:"
     for key, value in mapping |> Map.toSeq |> Seq.sortBy fst do
-        printfn "%2i -> %2i (%i -> %s)" key value testPatternNodes.[key] testTargetNodes.[value]
+        printfn "%2i -> %2i (%i -> %s)" key value queryNodes.[key] targetNodes.[value]
+
+printfn "Suggested edges:"
+for ext in QueryBuilder.findEdgeExtensions queryGraph (mappings |> Seq.map (fun mapping -> target, mapping)) do
+    printfn "%A" ext
+
+printfn "Suggested nodes:"
+for ext in QueryBuilder.findNodeExtensions queryGraph (mappings |> Seq.map (fun mapping -> target, mapping)) do
+    printfn "- %f: %A -> %A\n  Outgoing: %A\n  Incoming: %A" ext.Fraction ext.QueryNode ext.AdjacentLoops ext.Outgoing ext.Incoming
+    printfn "  Occurrences:"
+    for target, mapping, node in ext.Occurrences do
+        printfn "  - %A: %A -> (new) %A" (target.Graph.Length) (mapping.[ext.QueryNode]) node

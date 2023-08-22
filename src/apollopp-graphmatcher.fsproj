@@ -11,6 +11,7 @@
     <Compile Include="SetTrieSetMap.fs" />
     <Compile Include="DirectedSuMGra.fs" />
     <Compile Include="PatternTree.fs" />
+    <Compile Include="QueryBuilder.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

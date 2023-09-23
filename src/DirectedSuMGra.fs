@@ -271,10 +271,11 @@ type Target<'node, 'edge when 'edge : comparison> =
 module Target =
     /// Build all required representations from the target graph
     let fromMultiGraph (id: string) (target: MultiGraph<'edge>, nodeArray: ImmutableArray<'node>) =
+        let signatureMap = MultiGraph.signatureMap target
         { Id = id
-          SignatureIndex = SignatureIndex.create (MultiGraph.signatureMap target)
+          SignatureIndex = SignatureIndex.create signatureMap
           NeighborhoodIndex = NeighborhoodIndex.create target
-          SignatureMap = MultiGraph.signatureMap target
+          SignatureMap = signatureMap
           Graph = target
           NodeArray = nodeArray }
 

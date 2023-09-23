@@ -102,10 +102,10 @@ module MultiGraph =
         |> ImmutableArray.ToImmutableArray
 
     let encode (encoder: Encoder<'edge>) : Encoder<MultiGraph<'edge>> =
-        fun graph -> Encode.array2D (Seq.map encoder >> Encode.seq) graph
+        fun graph -> Graph.encode Encode.int encoder (toIntGraph graph)
 
     let decode (decoder: Decoder<'edge>) : Decoder<MultiGraph<'edge>> =
-        Decode.array2D (Decode.set decoder)
+        Graph.decode Decode.int decoder |> Decode.map fromIntGraph
 
 module Signature =
     let encode (encoder: Encoder<'edge>) : Encoder<Signature<'edge>> =

@@ -70,10 +70,10 @@ module Graph =
     let inline map (fn: 'anode -> 'bnode) (fe: 'aedge -> 'bedge) (graph: Graph<'anode, 'aedge>) : Graph<'bnode, 'bedge> =
         graph |> Set.map (fun (from, edge, to') -> fn from, fe edge, fn to')
 
-    let encoder (nodeEncoder: Encoder<'node>) (edgeEncoder: Encoder<'edge>) : Encoder<Graph<'node, 'edge>> =
+    let encode (nodeEncoder: Encoder<'node>) (edgeEncoder: Encoder<'edge>) : Encoder<Graph<'node, 'edge>> =
         Seq.map (Encode.tuple3 nodeEncoder edgeEncoder nodeEncoder)
         >> Encode.seq
 
-    let decoder (nodeDecoder: Decoder<'node>) (edgeDecoder: Decoder<'edge>) : Decoder<Graph<'node, 'edge>> =
+    let decode (nodeDecoder: Decoder<'node>) (edgeDecoder: Decoder<'edge>) : Decoder<Graph<'node, 'edge>> =
         Decode.list (Decode.tuple3 nodeDecoder edgeDecoder nodeDecoder)
         |> Decode.map (Set.ofList)

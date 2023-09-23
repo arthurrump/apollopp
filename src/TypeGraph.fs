@@ -64,6 +64,6 @@ type TypeGraph<'node when 'node : comparison> = Graph<'node, TypeGraphEdge>
 
 module TypeGraph = 
     let encoder (nodeEncoder: Encoder<'node>) : Encoder<TypeGraph<'node>> = 
-        Graph.encoder nodeEncoder TypeGraphEdge.encoder
+        Graph.encode nodeEncoder TypeGraphEdge.encoder
     let decoder (nodeDecoder: Decoder<'node>) : Decoder<TypeGraph<'node>> = 
-        Graph.decoder nodeDecoder TypeGraphEdge.decoder
+        Graph.decode nodeDecoder TypeGraphEdge.decoder

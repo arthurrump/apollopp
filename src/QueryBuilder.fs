@@ -13,16 +13,16 @@ type EdgeExtension<'edge> =
       /// The fraction of mapped targets that contain this edge
       Fraction: float }
 
-type NodeExtension<'edge when 'edge : comparison> =
+type NodeExtension<'node, 'edge when 'edge : comparison> =
     { QueryNode: int
       AdjacentLoops: Set<'edge>
       Outgoing: Set<'edge>
       Incoming: Set<'edge>
       Fraction: float
-      Occurrences: (Target<'edge> * Map<int, int> * int) list }
+      Occurrences: (Target<'node, 'edge> * Map<int, int> * int) list }
 
 module QueryBuilder =
-    let findEdgeExtensions (query: Graph<int, 'edge>) (targetMappings: (Target<'edge> * Map<int, int>) seq) =
+    let findEdgeExtensions (query: Graph<int, 'edge>) (targetMappings: (Target<'tnode, 'edge> * Map<int, int>) seq) =
         let targetCount = targetMappings |> Seq.length
         let extensions = seq {
             for target, mapping in targetMappings do
@@ -38,7 +38,7 @@ module QueryBuilder =
         |> Seq.map (fun (extension, count) -> { Edge = extension; Fraction = float count / float targetCount })
         |> Seq.sortByDescending (fun e -> e.Fraction)
 
-    let findNodeExtensions (query: Graph<int, 'edge>) (targetMappings: (Target<'edge> * Map<int, int>) seq) =
+    let findNodeExtensions (query: Graph<int, 'edge>) (targetMappings: (Target<'tnode, 'edge> * Map<int, int>) seq) =
         let targetCount = targetMappings |> Seq.length
         seq {
             for queryNode in query |> Graph.nodes do

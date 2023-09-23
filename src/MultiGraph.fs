@@ -2,6 +2,7 @@ namespace MultiGraph
 
 open Graph
 open System.Collections.Immutable
+open Thoth.Json.Net
 
 type MultiGraph<'edge when 'edge : comparison> = Set<'edge>[,]
 type Signature<'edge when 'edge : comparison> =
@@ -96,3 +97,24 @@ module MultiGraph =
     let signatureMap (graph: MultiGraph<'edge>) : ImmutableArray<Signature<'edge>> =
         Seq.init (nodeCount graph) (signature graph)
         |> ImmutableArray.ToImmutableArray
+
+    let encode (encoder: Encoder<'edge>) : Encoder<MultiGraph<'edge>> =
+        fun graph -> Encode.array2D (Seq.map encoder >> Encode.seq) graph
+
+    let decode (decoder: Decoder<'edge>) : Decoder<MultiGraph<'edge>> =
+        Decode.array2D (Decode.set decoder)
+
+module Signature =
+    let encode (encoder: Encoder<'edge>) : Encoder<Signature<'edge>> =
+        fun signature -> Encode.object [
+            "incoming", signature.Incoming |> Seq.map (Seq.map encoder >> Encode.seq) |> Encode.seq
+            "outgoing", signature.Outgoing |> Seq.map (Seq.map encoder >> Encode.seq) |> Encode.seq
+            "loops", signature.Loops |> Seq.map encoder |> Encode.seq
+        ]
+
+    let decode (decoder: Decoder<'edge>) : Decoder<Signature<'edge>> =
+        Decode.object (fun get ->
+            { Incoming = get.Required.Field "incoming" (Decode.immArray (Decode.set decoder))
+              Outgoing = get.Required.Field "outgoing" (Decode.immArray (Decode.set decoder))
+              Loops = get.Required.Field "loops" (Decode.set decoder) }
+        )

@@ -6,6 +6,7 @@ namespace RTree
 
 open System
 open System.Collections.Immutable
+open Thoth.Json.Net
 
 module Array =
     open Microsoft.FSharp.Core.LanguagePrimitives
@@ -88,6 +89,18 @@ module Rect =
 
     let inline area (rect: Rect<'t>) : 't =
         Array.sub rect.High rect.Low |> Array.reduce (fun a b -> a * b)
+
+    let encode (encodeT: Encoder<'t>) : Encoder<Rect<'t>> =
+        fun rect -> Encode.object [
+            "low", Encode.array (Array.map encodeT rect.Low)
+            "high", Encode.array (Array.map encodeT rect.High)
+        ]
+
+    let decode (decodeT: Decoder<'t>) : Decoder<Rect<'t>> =
+        Decode.object (fun get ->
+            { Low = get.Required.Field "low" (Decode.array decodeT)
+              High = get.Required.Field "high" (Decode.array decodeT)  }
+        )
 
 type RTree<'k, 'v> =
     | Leaf of key: Rect<'k> * value: 'v
@@ -196,3 +209,30 @@ module RTree =
     /// Get all values that intersect the given rectangle
     let searchIntersection (rect: Rect<'k>) (node: RTree<'k, 'v>) : ImmutableArray<'v> =
         search (fun key rect -> Rect.intersects key rect) (fun key rect -> Rect.intersects key rect) rect node
+
+    let rec encode (encodeKey: Encoder<'k>) (encodeValue: Encoder<'v>) : Encoder<RTree<'k, 'v>> = function
+        | Leaf (key, value) -> 
+            [ Encode.string "Leaf"
+              Rect.encode encodeKey key
+              encodeValue value ]
+            |> Encode.list
+        | Branch (key, entries) -> 
+            [ Encode.string "Branch"
+              Rect.encode encodeKey key
+              Encode.seq (Seq.map (encode encodeKey encodeValue) entries) ]
+            |> Encode.list
+
+    let rec decode (decodeKey: Decoder<'k>) (decodeValue: Decoder<'v>) : Decoder<RTree<'k, 'v>> =
+        Decode.index 0 Decode.string 
+        |> Decode.andThen (function
+            | "Leaf" ->
+                Decode.map2 (fun key value -> Leaf (key, value))
+                    (Decode.index 1 (Rect.decode decodeKey))
+                    (Decode.index 2 decodeValue)
+            | "Branch" ->
+                Decode.map2 (fun key entries -> Branch (key, entries))
+                    (Decode.index 1 (Rect.decode decodeKey))
+                    (Decode.index 2 (Decode.immArray (decode decodeKey decodeValue)))
+            | invalid ->
+                Decode.fail $"`%s{invalid}` is not a valid type of node in an RTree. Expecting `Leaf` or `Branch`."
+        )

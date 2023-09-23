@@ -9,6 +9,7 @@ open RTree
 open SetTrieSetMap
 
 open System.Collections.Immutable
+open Thoth.Json.Net
 
 module private Seq =
     open Microsoft.FSharp.Core.LanguagePrimitives
@@ -64,11 +65,28 @@ module SignatureIndex =
     let search (features: int[]) (signatureIndex: SignatureIndex) : ImmutableArray<int> =
         signatureIndex |> RTree.searchContainment (Rect.fromOriginToPoint features)
 
+    let encode : Encoder<SignatureIndex> = RTree.encode Encode.int Encode.int
+    let decode : Decoder<SignatureIndex> = RTree.decode Decode.int Decode.int
+
 /// An index of neighbouring nodes for a single node in the graph, keyed by the
 /// set of multiedge labels going to or coming in from the neighbouring node
 type NeighborhoodNodeIndex<'edge when 'edge : comparison> = 
     { IncomingIndex: SetTrieSetMap<'edge, int>
       OutgoingIndex: SetTrieSetMap<'edge, int> }
+
+module NeighborhoodNodeIndex =
+    let encode (encodeEdge: Encoder<'edge>) : Encoder<NeighborhoodNodeIndex<'edge>> =
+        fun index -> Encode.object [
+            "incoming", SetTrieSetMap.encode encodeEdge Encode.int index.IncomingIndex
+            "outgoing", SetTrieSetMap.encode encodeEdge Encode.int index.OutgoingIndex
+        ]
+
+    let decode (decodeEdge: Decoder<'edge>) : Decoder<NeighborhoodNodeIndex<'edge>> =
+        Decode.object (fun get ->
+            { IncomingIndex = get.Required.Field "incoming" (SetTrieSetMap.decode decodeEdge Decode.int)
+              OutgoingIndex = get.Required.Field "outgoing" (SetTrieSetMap.decode decodeEdge Decode.int) }
+        )
+
 /// An index of neighbouring nodes for all nodes in the graph
 type NeighborhoodIndex<'edge when 'edge : comparison> = 
     ImmutableArray<NeighborhoodNodeIndex<'edge>>
@@ -120,17 +138,25 @@ module NeighborhoodIndex =
                 (neighborhoodIndex.[node].IncomingIndex |> SetTrieSetMap.searchSuperset incomingEdges)
                 (neighborhoodIndex.[node].OutgoingIndex |> SetTrieSetMap.searchSuperset outgoingEdges)
 
+    let encode (encodeEdge: Encoder<'edge>) : Encoder<NeighborhoodIndex<'edge>> =
+        fun index -> index |> Seq.map (NeighborhoodNodeIndex.encode encodeEdge) |> Encode.seq
+
+    let decode (decodeEdge: Decoder<'edge>) : Decoder<NeighborhoodIndex<'edge>> =
+        Decode.immArray (NeighborhoodNodeIndex.decode decodeEdge)
+
 /// Container for all representations of the query graph used by the subgraph
 /// matching algorithm
-type Query<'edge when 'edge : comparison> =
-    { /// Signatures for each node in the query graph
+type Query<'node, 'edge when 'edge : comparison> =
+    { Id: string
+      /// Signatures for each node in the query graph
       SignatureMap: ImmutableArray<Signature<'edge>>
       /// Feature vectors for each node in the query graph
       FeatureMap: ImmutableArray<int[]>
       /// Order in which the nodes of the query graph should be matched
       Order: int list
       /// The query graph itself
-      Graph: MultiGraph<'edge> }
+      Graph: MultiGraph<'edge>
+      NodeArray: ImmutableArray<'node> }
 
 module Query =
     module private Order =
@@ -184,44 +210,101 @@ module Query =
                 order |> List.ofArray
 
     /// Build all required representations from the query graph
-    let fromGraph (query: MultiGraph<'edge>) =
+    let fromMultiGraph (id: string) (query: MultiGraph<'edge>, nodeArray: ImmutableArray<'node>) =
         let signatureMap = MultiGraph.signatureMap query
-        { SignatureMap = signatureMap
+        { Id = id
+          SignatureMap = signatureMap
           FeatureMap = signatureMap |> Seq.map SignatureIndex.features |> ImmutableArray.ToImmutableArray
           Order = Order.getOrder query
-          Graph = query }
+          Graph = query
+          NodeArray = nodeArray }
+
+    let fromGraph (id: string) (query: Graph<'node, 'edge>) =
+        fromMultiGraph id (MultiGraph.fromGraph query)
 
     /// Extend an existing query with an extended query graph, updating the
     /// indices, but keeping the order of the original nodes intact, such that
     /// this query can be used to extend a mapping created with the base query
     /// graph
-    let extendWithGraph (extended: MultiGraph<'edge>) (query: Query<'edge>) =
+    let extendWithMultiGraph (id: string) (extended: MultiGraph<'edge>, extendedNodeArray: ImmutableArray<'node>) (query: Query<'node, 'edge>) =
         let signatureMap = MultiGraph.signatureMap extended
-        { SignatureMap = signatureMap
+        { Id = id
+          SignatureMap = signatureMap
           FeatureMap = signatureMap |> Seq.map SignatureIndex.features |> ImmutableArray.ToImmutableArray
           Order = Order.extendOrder query.Order extended
-          Graph = extended }
+          Graph = extended
+          NodeArray = extendedNodeArray }
+    
+    let extendWithGraph (id: string) (extension: Graph<'node, 'edge>) (query: Query<'node, 'edge>) =
+        extendWithMultiGraph id (MultiGraph.extendWithGraph extension (query.Graph, query.NodeArray)) query
+
+    let encode (encodeNode: Encoder<'node>) (encodeEdge: Encoder<'edge>) : Encoder<Query<'node, 'edge>> =
+        fun query -> Encode.object [
+            "id", query.Id |> Encode.string
+            "signatureMap", query.SignatureMap |> Seq.map (Signature.encode encodeEdge) |> Encode.seq
+            "featureMap", query.FeatureMap |> Seq.map (Seq.map Encode.int >> Encode.seq) |> Encode.seq
+            "order", query.Order |> List.map Encode.int |> Encode.list
+            "graph", query.Graph |> MultiGraph.encode encodeEdge
+            "nodeArray", query.NodeArray |> Seq.map encodeNode |> Encode.seq
+        ]
+
+    let decode (decodeNode: Decoder<'node>) (decodeEdge: Decoder<'edge>) : Decoder<Query<'node, 'edge>> =
+        Decode.object (fun get ->
+            { Id = get.Required.Field "id" Decode.string
+              SignatureMap = get.Required.Field "signatureMap" (Decode.immArray (Signature.decode decodeEdge))
+              FeatureMap = get.Required.Field "featureMap" (Decode.immArray (Decode.array Decode.int))
+              Order = get.Required.Field "order" (Decode.list Decode.int)
+              Graph = get.Required.Field "graph" (MultiGraph.decode decodeEdge)
+              NodeArray = get.Required.Field "nodeArray" (Decode.immArray decodeNode) }
+        )
 
 /// Container for all representations of the target graph used by the subgraph
 /// matching algorithm
-type Target<'edge when 'edge : comparison> =
-    { SignatureIndex: SignatureIndex
+type Target<'node, 'edge when 'edge : comparison> =
+    { Id: string
+      SignatureIndex: SignatureIndex
       NeighborhoodIndex: NeighborhoodIndex<'edge>
       SignatureMap: ImmutableArray<Signature<'edge>>
-      Graph: MultiGraph<'edge> }
+      Graph: MultiGraph<'edge>
+      NodeArray: ImmutableArray<'node> }
 
 module Target =
     /// Build all required representations from the target graph
-    let fromGraph (target: MultiGraph<'edge>) =
-        { SignatureIndex = SignatureIndex.create (MultiGraph.signatureMap target)
+    let fromMultiGraph (id: string) (target: MultiGraph<'edge>, nodeArray: ImmutableArray<'node>) =
+        { Id = id
+          SignatureIndex = SignatureIndex.create (MultiGraph.signatureMap target)
           NeighborhoodIndex = NeighborhoodIndex.create target
           SignatureMap = MultiGraph.signatureMap target
-          Graph = target }
+          Graph = target
+          NodeArray = nodeArray }
+
+    let fromGraph (id: string) (target: Graph<'node, 'edge>) =
+        fromMultiGraph id (MultiGraph.fromGraph target)
+
+    let encode (encodeNode: Encoder<'node>) (encodeEdge: Encoder<'edge>) : Encoder<Target<'node, 'edge>> =
+        fun target -> Encode.object [
+            "id", target.Id |> Encode.string
+            "signatureIndex", target.SignatureIndex |> SignatureIndex.encode
+            "neighborhoodIndex", target.NeighborhoodIndex |> NeighborhoodIndex.encode encodeEdge
+            "signatureMap", target.SignatureMap |> Seq.map (Signature.encode encodeEdge) |> Encode.seq
+            "graph", target.Graph |> MultiGraph.encode encodeEdge
+            "nodeArray", target.NodeArray |> Seq.map encodeNode |> Encode.seq
+        ]
+
+    let decode (decodeNode: Decoder<'node>) (decodeEdge: Decoder<'edge>) : Decoder<Target<'node, 'edge>> =
+        Decode.object (fun get -> 
+            { Id = get.Required.Field "id" Decode.string
+              SignatureIndex = get.Required.Field "signatureIndex" SignatureIndex.decode
+              NeighborhoodIndex = get.Required.Field "neighborhoodIndex" (NeighborhoodIndex.decode decodeEdge)
+              SignatureMap = get.Required.Field "signatureMap" (Decode.immArray (Signature.decode decodeEdge))
+              Graph = get.Required.Field "graph" (MultiGraph.decode decodeEdge)
+              NodeArray = get.Required.Field "nodeArray" (Decode.immArray decodeNode) }
+        )
 
 module SubgraphSearch =
     /// Select initial candidates using the SignatureIndex and verify that the
     /// loops are compatible
-    let private selectInitialCandidates (target: Target<'edge>) (query: Query<'edge>) (currentQueryNode: int) =
+    let private selectInitialCandidates (target: Target<'tnode, 'edge>) (query: Query<'qnode, 'edge>) (currentQueryNode: int) =
         SignatureIndex.search query.FeatureMap.[currentQueryNode] target.SignatureIndex
         |> Seq.filter (fun candidateTargetNode ->
             Set.isSuperset target.SignatureMap.[candidateTargetNode].Loops query.SignatureMap.[currentQueryNode].Loops
@@ -229,7 +312,7 @@ module SubgraphSearch =
 
     /// Find all target nodes that are joinable with the already mapped query
     /// and thus are candidates to match with the current query node
-    let private findJoinable (target: Target<'edge>) (query: Query<'edge>) (currentQueryNode: int) (mapping: Map<int, int>) : Set<int> =
+    let private findJoinable (target: Target<'tnode, 'edge>) (query: Query<'qnode, 'edge>) (currentQueryNode: int) (mapping: Map<int, int>) : Set<int> =
         // Find all adjacent nodes of the current (to-be-matched) query node and
         MultiGraph.adjacent currentQueryNode query.Graph
         // filter to those that are already mapped (and include the mapped target node).
@@ -289,7 +372,7 @@ module SubgraphSearch =
     /// Recursively extend the given mapping until all query nodes in the
     /// nextQueryNodes list are matched, returning the sequence of all valid
     /// mappings
-    let rec private extendMapping (target: Target<'edge>) (query: Query<'edge>) (nextQueryNodes: int list) (mapping: Map<int, int>) : Map<int, int> seq =
+    let rec private extendMapping (target: Target<'tnode, 'edge>) (query: Query<'qnode, 'edge>) (nextQueryNodes: int list) (mapping: Map<int, int>) : Map<int, int> seq =
         match nextQueryNodes with
         | currentQueryNode :: nextQueryNodes ->
             let candidateNodes = findJoinable target query currentQueryNode mapping
@@ -303,7 +386,7 @@ module SubgraphSearch =
 
     /// Search for mappings based on target and query graph representations,
     /// returning the sequence of all valid mappings
-    let search (target: Target<'edge>) (query: Query<'edge>) =
+    let search (target: Target<'tnode, 'edge>) (query: Query<'qnode, 'edge>) =
         match query.Order with
         | currentQueryNode :: nextQueryNodes ->
             let initCandidateNodes = selectInitialCandidates target query currentQueryNode
@@ -327,29 +410,22 @@ module SubgraphSearch =
     /// first *n* nodes in the query node ordering. This is the case if the
     /// extended query is built using <c>Query.extendWithGraph</c>, extending
     /// the query that was used to find the mapping.
-    let searchExtended (target: Target<'edge>) (extendedQuery: Query<'edge>) (mapping: Map<int, int>) =
+    let searchExtended (target: Target<'tnode, 'edge>) (extendedQuery: Query<'qnode, 'edge>) (mapping: Map<int, int>) =
         if verifyN (Map.count mapping) target.Graph extendedQuery.Graph mapping then
             let nextQueryNodes = extendedQuery.Order |> List.skip (Map.count mapping)
             extendMapping target extendedQuery nextQueryNodes mapping
         else
             Seq.empty
 
-    /// Search for mappings of the query graph to the target graph, returning
-    /// the sequence of all valid mappings
-    let searchSimple (targetGraph: MultiGraph<'edge>) (queryGraph: MultiGraph<'edge>) =
-        let target = Target.fromGraph targetGraph
-        let query = Query.fromGraph queryGraph
-        search target query
-
     /// Search for mappings of the query graph to the target graph based on the
     /// edgeset graph representation, returning the sequence of all valid
     /// mappings
-    let searchSimpleGraph (targetGraph: Graph<'node, 'edge>) (queryGraph: Graph<'node, 'edge>) =
-        let target, targetNodes = MultiGraph.fromGraph targetGraph
-        let query, queryNodes = MultiGraph.fromGraph queryGraph
-        searchSimple target query
+    let searchSimpleGraph (targetGraph: Graph<'tnode, 'edge>) (queryGraph: Graph<'qnode, 'edge>) =
+        let target = Target.fromGraph "target" targetGraph
+        let query = Query.fromGraph "query" queryGraph
+        search target query
         |> Seq.map (
             Map.toSeq
-            >> Seq.map (fun (q, t) -> queryNodes.[q], targetNodes.[t]) 
+            >> Seq.map (fun (q, t) -> query.NodeArray.[q], target.NodeArray.[t]) 
             >> Map.ofSeq
         )

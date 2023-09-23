@@ -25,10 +25,8 @@ let tests =
             testProperty "extendWithGraph preserves original order" <| 
                 fun (graph: Graph<string, string>, extension: Graph<string, string>) ->
                     not (Set.isEmpty graph) ==> lazy
-                        let mg, nodeArray = MultiGraph.fromGraph graph
-                        let query = Query.fromGraph mg
-                        let extended, _ = MultiGraph.extendWithGraph extension (mg, nodeArray)
-                        let extendedQuery = Query.extendWithGraph extended query
+                        let query = Query.fromGraph "testRoot" graph
+                        let extendedQuery = Query.extendWithGraph "testExtension" extension query
                         test <@ List.take (List.length query.Order) extendedQuery.Order = query.Order @>
         ]
         testList "SubgraphSearch" [
@@ -79,27 +77,25 @@ let tests =
 
             testProperty "All mappings can be verified" <| fun (target: Graph<int, int>) (query: Graph<int, int>) ->
                 not (Set.isEmpty target || Set.isEmpty query) ==> lazy
-                    let targetMg = MultiGraph.fromGraph target |> fst
-                    let queryMg = MultiGraph.fromGraph query |> fst
-                    test <@ SubgraphSearch.searchSimple targetMg queryMg |> Seq.forall (SubgraphSearch.verify targetMg queryMg) @>
+                    let target = Target.fromGraph "target" target
+                    let query = Query.fromGraph "query" query
+                    test <@ SubgraphSearch.search target query |> Seq.forall (SubgraphSearch.verify target.Graph query.Graph) @>
 
             testProperty "All mappings that are not returned, cannot be verified" <| fun (target: Graph<int, int>) (query: Graph<int, int>) ->
                 not (Set.isEmpty target || Set.isEmpty query) ==> lazy
-                    let targetMg, targetNodes = MultiGraph.fromGraph target
-                    let queryMg, queryNodes = MultiGraph.fromGraph query
-                    queryNodes.Length <= targetNodes.Length ==> lazy
-                        let mappings = set (SubgraphSearch.searchSimple targetMg queryMg)
-                        Prop.forAll (arbitraryMapping queryNodes.Length targetNodes.Length) <| fun mapping ->
-                            test <@ SubgraphSearch.verify targetMg queryMg mapping = Seq.contains mapping mappings @>
+                    let target = Target.fromGraph "target" target
+                    let query = Query.fromGraph "query" query
+                    query.NodeArray.Length <= target.NodeArray.Length ==> lazy
+                        let mappings = set (SubgraphSearch.search target query)
+                        Prop.forAll (arbitraryMapping query.NodeArray.Length target.NodeArray.Length) <| fun mapping ->
+                            test <@ SubgraphSearch.verify target.Graph query.Graph mapping = Seq.contains mapping mappings @>
 
             testProperty "search base |> searchExtended ext = search ext, both trough Query.extendWithGraph" <|
                 fun (target: Graph<int, int>, queryBase: Graph<int, int>, queryExtension: Graph<int, int>) ->
                     not (Set.isEmpty target || Set.isEmpty queryBase) ==> lazy
-                        let target = Target.fromGraph (MultiGraph.fromGraph target |> fst)
-                        let queryBaseMg, queryBaseNodeArray = MultiGraph.fromGraph queryBase
-                        let queryBase = Query.fromGraph queryBaseMg
-                        let queryExtMg, _ = MultiGraph.extendWithGraph queryExtension (queryBaseMg, queryBaseNodeArray)
-                        let queryExt = Query.extendWithGraph queryExtMg queryBase
+                        let target = Target.fromGraph "target" target
+                        let queryBase = Query.fromGraph "queryBase" queryBase
+                        let queryExt = Query.extendWithGraph "queryExt" queryExtension queryBase
 
                         let resultsDirect = SubgraphSearch.search target queryExt
                         let resultsExtended = 
@@ -109,14 +105,12 @@ let tests =
                         test <@ set resultsExtended = set resultsDirect @>
 
             testProperty "search base |> searchExtended ext = search ext', with ext' through Query.fromGraph" <|
-                fun (target: Graph<int, int>, queryBase: Graph<int, int>, queryExtension: Graph<int, int>) ->
-                    not (Set.isEmpty target || Set.isEmpty queryBase) ==> lazy
-                        let target = Target.fromGraph (MultiGraph.fromGraph target |> fst)
-                        let queryBaseMg, queryBaseNodeArray = MultiGraph.fromGraph queryBase
-                        let queryBase = Query.fromGraph queryBaseMg
-                        let queryExtMg, _ = MultiGraph.extendWithGraph queryExtension (queryBaseMg, queryBaseNodeArray)
-                        let queryExt = Query.extendWithGraph queryExtMg queryBase
-                        let queryExt' = Query.fromGraph queryExtMg
+                fun (targetGraph: Graph<int, int>, queryBaseGraph: Graph<int, int>, queryExtension: Graph<int, int>) ->
+                    not (Set.isEmpty targetGraph || Set.isEmpty queryBaseGraph) ==> lazy
+                        let target = Target.fromGraph "target" targetGraph
+                        let queryBase = Query.fromGraph "queryBase" queryBaseGraph
+                        let queryExt = Query.extendWithGraph "queryExt" queryExtension queryBase
+                        let queryExt' = Query.fromGraph "queryExt'" (Graph.combine queryBaseGraph queryExtension)
 
                         let resultsDirect = SubgraphSearch.search target queryExt'
                         let resultsExtended = 
@@ -126,15 +120,13 @@ let tests =
                         test <@ set resultsExtended = set resultsDirect @>
 
             testCase "search base |> searchExtended ext = search ext' with disconnected query" <| fun () ->
-                let target = set [ 0, 0, 0; 0, 2, 1 ]
-                let queryBase = set [ 0, 0, 0 ]
+                let targetGraph = set [ 0, 0, 0; 0, 2, 1 ]
+                let queryBaseGraph = set [ 0, 0, 0 ]
                 let queryExtension = set [ 2, 2, 1 ]
-                let target = Target.fromGraph (MultiGraph.fromGraph target |> fst)
-                let queryBaseMg, queryBaseNodeArray = MultiGraph.fromGraph queryBase
-                let queryBase = Query.fromGraph queryBaseMg
-                let queryExtMg, _ = MultiGraph.extendWithGraph queryExtension (queryBaseMg, queryBaseNodeArray)
-                let queryExt = Query.extendWithGraph queryExtMg queryBase
-                let queryExt' = Query.fromGraph queryExtMg
+                let target = Target.fromGraph "target" targetGraph
+                let queryBase = Query.fromGraph "queryBase" queryBaseGraph
+                let queryExt = Query.extendWithGraph "queryExt" queryExtension queryBase
+                let queryExt' = Query.fromGraph "queryExt'" (Graph.combine queryBaseGraph queryExtension)
 
                 let resultsDirect = SubgraphSearch.search target queryExt'
                 let resultsExtended = 
@@ -145,8 +137,8 @@ let tests =
 
             testProperty "Extending an empty map gives the same results as a normal search" <| fun (target: Graph<int, int>) (query: Graph<int, int>) ->
                 not (Set.isEmpty target || Set.isEmpty query) ==> lazy
-                    let target = Target.fromGraph (MultiGraph.fromGraph target |> fst)
-                    let query = Query.fromGraph (MultiGraph.fromGraph query |> fst)
+                    let target = Target.fromGraph "target" target
+                    let query = Query.fromGraph "query" query
                     test <@ set (SubgraphSearch.search target query) = set (SubgraphSearch.searchExtended target query Map.empty) @>
         ]
     ]

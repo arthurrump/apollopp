@@ -3,6 +3,7 @@ namespace PatternTree
 open DirectedSuMGra
 open Graph
 open MultiGraph
+open System.Collections.Immutable
 
 type Verdict = Positive | Negative | Neutral
 
@@ -12,48 +13,36 @@ type PatternTree<'pattern> =
       Children: PatternTree<'pattern> list }
 
 module PatternTree =
-    open System.Collections.Immutable
-    let buildMultigraphs (tree: PatternTree<Graph<'node, 'edge>>) : PatternTree<MultiGraph<'edge> * ImmutableArray<'node>> =
-        let rec buildMultigraphs (baseMg, baseNodeArray) tree =
-            let mg, nodeArray = MultiGraph.extendWithGraph tree.Pattern (baseMg, baseNodeArray)
-            { Verdict = tree.Verdict
-              Pattern = mg, nodeArray
-              Children = tree.Children |> List.map (buildMultigraphs (mg, nodeArray)) }
-        let mg, nodeArray = MultiGraph.fromGraph tree.Pattern
-        { Verdict = tree.Verdict
-          Pattern = mg, nodeArray
-          Children = tree.Children |> List.map (buildMultigraphs (mg, nodeArray)) }
 
-    let buildQueries (tree: PatternTree<MultiGraph<'edge> * ImmutableArray<'node>>) : PatternTree<Query<'edge> * ImmutableArray<'node>> =
-        let rec buildQueries baseQuery tree =
-            let queryGraph, nodeArray = tree.Pattern
-            let query = Query.extendWithGraph queryGraph baseQuery
+    let buildQueries (tree: PatternTree<Graph<'node, 'edge>>) : PatternTree<Query<'node, 'edge>> =
+        let rec buildQueries (baseQuery: Query<'node, 'edge>) i tree =
+            let query = Query.extendWithGraph ($"%s{baseQuery.Id}.%d{i}") tree.Pattern baseQuery
             { Verdict = tree.Verdict
-              Pattern = query, nodeArray
-              Children = tree.Children |> List.map (buildQueries query) }
-        let queryGraph, nodeArray = tree.Pattern
-        let query = Query.fromGraph queryGraph
+              Pattern = query
+              Children = tree.Children |> List.mapi (buildQueries query) }
+        let query = Query.fromGraph "root" tree.Pattern
         { Verdict = tree.Verdict
-          Pattern = query, nodeArray
-          Children = tree.Children |> List.map (buildQueries query) }
+          Pattern = query
+          Children = tree.Children |> List.mapi (buildQueries query) }
 
-    let search (target: Target<'edge>) (tree: PatternTree<Query<'edge> * ImmutableArray<'node>>) : (Verdict * Map<int, int> * ImmutableArray<'node>) seq =
+    let search (target: Target<'tnode, 'edge>) (tree: PatternTree<Query<'qnode, 'edge>>) : (Verdict * Query<'qnode, 'edge> * Map<int, int>) seq =
         let rec search target mapping tree =
             seq {
-                let query, nodeArray = tree.Pattern
-                for mapping in SubgraphSearch.searchExtended target query mapping do
+                for mapping in SubgraphSearch.searchExtended target tree.Pattern mapping do
                     let childResults = tree.Children |> Seq.collect (search target mapping)
                     if Seq.isEmpty childResults 
-                    then yield tree.Verdict, mapping, nodeArray
+                    then yield tree.Verdict, tree.Pattern, mapping 
                     else yield! childResults
             }
         search target Map.empty tree
 
-    let searchSimple (targetGraph: Graph<'tnode, 'edge>) (tree: PatternTree<Graph<'pnode, 'edge>>) : (Verdict * Map<'pnode, 'tnode>) seq =
-        let targetMg, targetNodeArray = MultiGraph.fromGraph targetGraph
-        let target = Target.fromGraph targetMg
-        let tree = tree |> buildMultigraphs |> buildQueries
-        search target tree
-        |> Seq.map (fun (verdict, mapping, queryNodeArray) ->
-            verdict, mapping |> Seq.map (fun (KeyValue (key, value)) -> queryNodeArray.[key], targetNodeArray.[value]) |> Map.ofSeq
+    let searchSimple (targetGraph: Graph<'tnode, 'edge>) (tree: PatternTree<Graph<'qnode, 'edge>>) : (Verdict * Query<'qnode, 'edge> * Map<'qnode, 'tnode>) seq =
+        let target = Target.fromGraph "target" targetGraph
+        search target (buildQueries tree)
+        |> Seq.map (fun (verdict, query, mapping) -> 
+            let mapping = 
+                mapping
+                |> Seq.map (fun (KeyValue (qnode, tnode)) -> query.NodeArray[qnode], target.NodeArray[tnode]) 
+                |> Map.ofSeq
+            verdict, query, mapping
         )

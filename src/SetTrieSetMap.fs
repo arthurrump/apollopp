@@ -3,6 +3,7 @@ namespace SetTrieSetMap
 // Based on https://github.com/mmihaltz/pysettrie/
 
 open System.Collections.Immutable
+open Thoth.Json.Net
 
 type SetTrieSetMap<'k, 'v when 'k : comparison and 'v : comparison> =
     { Values: Set<'v>
@@ -87,3 +88,15 @@ module SetTrieSetMap =
         
         searchSubset (word |> Set.toList |> List.sort) trie
         |> Set.union trie.Values
+
+    let rec encode (encodeKey: Encoder<'k>) (encodeValue: Encoder<'v>) : Encoder<SetTrieSetMap<'k, 'v>> =
+        fun trie -> Encode.object [
+            "values", Encode.seq (Seq.map encodeValue trie.Values)
+            "nodes", Encode.dictArray encodeKey (encode encodeKey encodeValue) trie.Nodes
+        ]
+
+    let rec decode (decodeKey: Decoder<'k>) (decodeValue: Decoder<'v>) : Decoder<SetTrieSetMap<'k, 'v>> =
+        Decode.object (fun get ->
+            { Values = get.Required.Field "values" (Decode.set decodeValue)
+              Nodes = get.Required.Field "nodes" (Decode.immSortedDictArray decodeKey (decode decodeKey decodeValue)) }
+        )

@@ -55,7 +55,10 @@ let tests =
                       Children = [] }
                   ] }
 
-            let results = set (PatternTree.searchSimple target patterns)
+            let results = 
+                PatternTree.searchSimple target patterns
+                |> Seq.map (fun (verdict, _, mapping) -> verdict, mapping)
+                |> Set.ofSeq
 
             let expected = set [ 
                 Negative, Map.ofList [ (0, "t0"); (1, "t02") ]

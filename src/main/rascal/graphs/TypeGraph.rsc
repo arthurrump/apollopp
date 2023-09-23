@@ -44,6 +44,8 @@ data TypeGraphEdge
     = \extends()
     | \implements()
     | \invokes()
+    | \overrides()
+    | \accessesField()
     | \dependsOn()
     | \contains()
     | \annotated(TypeGraphAnnotation annotation)
@@ -133,6 +135,14 @@ TypeGraph[loc] createTypeGraph(M3 model, Annotate annotate, bool incudeCompilati
     // and copy to all containing types, to still cover general invocation
     // structure even if methods are split up differently.
     g += { <fromAll, \invokes(), to> | <from, to> <- model.methodInvocation, fromAll <- getContainingTypes(from, model) };
+
+    // Method overrides, from methods to methods.
+    g += { <from, \overrides(), to> | <from, to> <- model.methodOverrides };
+
+    // Access to fields, from methods, constructors and classes to fields,
+    g += { <from, \accessesField(), to> | <from, to> <- model.fieldAccess, isField(to) };
+    // and copy to all containing types.
+    g += { <fromAll, \accessesField(), to> | <from, to> <- model.fieldAccess, isField(to), fromAll <- getContainingTypes(from, model) };
 
     // Annotate the graph using the annotation function
     g += { <\node, \annotated(a), \node> | \node <- (g<from> + g<to>), a <- annotate(\node) };

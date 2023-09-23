@@ -6,6 +6,7 @@ import lang::java::m3::Core;
 import graphs::TypeGraph;
 import graphs::Convert;
 import util::FileSystem;
+import lang::json::IO;
 
 list[loc] processingClassPath = 
     [ |file://D:/Program%20Files%20(portable)/processing-4.2/core/library/core.jar| ]
@@ -22,6 +23,7 @@ TypeGraph[loc] createTypeGraph(M3 model) {
 }
 
 loc aic2020 = |file://D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/AiC/submissions_cleaned_2020/assessed|;
+loc aic2022 = |file://D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/AiC/submissions_cleaned_2022/assessed|;
 
 list[loc] getProjects(loc dir) {
     return [ proj + "source" | proj <- dir.ls ];
@@ -29,7 +31,6 @@ list[loc] getProjects(loc dir) {
 
 list[M3] getProjectModels(loc dir) {
     result = for (proj <- getProjects(dir)) {
-        println("Building model for <proj>");
         append createModel(proj);
     }
     return result;
@@ -37,12 +38,15 @@ list[M3] getProjectModels(loc dir) {
 
 list[TypeGraph[loc]] getProjectTypeGraphs(loc dir) {
     result = for (model <- getProjectModels(dir)) {
-        println("Building type graph for <model.id>");
         append createTypeGraph(model);
     }
     return result;
 }
 
-tuple[str spmfGraphList, map[TypeGraphEdge, int] mapping] getSpmfTypeGraphList(loc dir) {
-    return writeSpmfGraphList(getProjectTypeGraphs(dir));
+void writeProjectTypeGraphs(loc dir) {
+    for (proj <- getProjects(dir)) {
+        model = createModel(proj);
+        typeGraph = createTypeGraph(model);
+        writeJSON(proj + "graph" + "typegraph.json", typeGraph);
+    }
 }

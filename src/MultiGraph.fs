@@ -21,13 +21,16 @@ module MultiGraph =
             mg.[from, to'] <- Set.add edge mg.[from, to']
         mg
 
-    let toIntGraph (graph: MultiGraph<'edge>) : Graph<int, 'edge> =
-        set <| seq {
+    let toIntGraphSeq (graph: MultiGraph<'edge>) : seq<Edge<int, 'edge>> =
+        seq {
             for from in 0 .. Array2D.length1 graph - 1 do
                 for to' in 0 .. Array2D.length1 graph - 1 do
                     for edge in graph.[from, to'] do
                         yield from, edge, to'
         }
+
+    let toIntGraph (graph: MultiGraph<'edge>) : Graph<int, 'edge> =
+        set (toIntGraphSeq graph)
     
     let fromGraph (graph: Graph<'node, 'edge>) : MultiGraph<'edge> * ImmutableArray<'node> =
         let nodeArray = graph |> Graph.nodes |> ImmutableArray.ToImmutableArray
@@ -102,10 +105,20 @@ module MultiGraph =
         |> ImmutableArray.ToImmutableArray
 
     let encode (encoder: Encoder<'edge>) : Encoder<MultiGraph<'edge>> =
-        fun graph -> Graph.encode Encode.int encoder (toIntGraph graph)
+        fun graph -> 
+            Encode.object [
+                "nodeCount", Encode.int (nodeCount graph)
+                "edges", Graph.encode Encode.int encoder (toIntGraphSeq graph)
+            ]
 
     let decode (decoder: Decoder<'edge>) : Decoder<MultiGraph<'edge>> =
-        Graph.decode Decode.int decoder |> Decode.map fromIntGraph
+        Decode.object <| fun get ->
+            let nodeCount = get.Required.Field "nodeCount" Decode.int
+            let edges = get.Required.Field "edges" (Graph.decodeArray Decode.int decoder)
+            let mg = initEmpty nodeCount
+            for from, edge, to' in edges do
+                mg.[from, to'] <- Set.add edge mg.[from, to']
+            mg
 
 module Signature =
     let encode (encoder: Encoder<'edge>) : Encoder<Signature<'edge>> =

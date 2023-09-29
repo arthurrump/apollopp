@@ -6,6 +6,7 @@ open Graph
 open Microsoft.ClearScript.V8
 open MultiGraph
 open PatternTree
+open Polly
 open QueryBuilder
 open System
 open System.Collections.Generic
@@ -13,6 +14,7 @@ open System.IO
 open System.Threading.Tasks
 open Thoth.Json.Net
 open TypeGraph
+open Polly.Retry
 
 module Task =
     let map f (t: Task<'t>) =
@@ -68,9 +70,15 @@ let makeTargets (graphPath: string) (skip: int option) (limit: int option) (targ
             |> Seq.toList
     }
 
-let makeCriterion (file: string) =
-    task {
-        let! content = File.ReadAllTextAsync file
+let makeCriterion =
+    let retry =
+        ResiliencePipelineBuilder()
+            .AddRetry(RetryStrategyOptions(MaxRetryAttempts = 10, Delay = TimeSpan.FromMilliseconds(100)))
+            .Build()
+
+    fun (file: string) -> task {
+        let! content =
+            retry.ExecuteAsync(fun ct -> File.ReadAllTextAsync(file, ct) |> ValueTask<string>)
         let json =
             match Path.GetExtension file with
             | ".json" ->

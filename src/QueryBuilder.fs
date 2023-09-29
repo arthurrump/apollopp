@@ -38,10 +38,10 @@ module QueryBuilder =
         |> Seq.map (fun (extension, count) -> { Edge = extension; Fraction = float count / float targetCount })
         |> Seq.sortByDescending (fun e -> e.Fraction)
 
-    let findNodeExtensions (query: Graph<int, 'edge>) (targetMappings: (Target<'tnode, 'edge> * Map<int, int>) seq) =
+    let findNodeExtensions (query: MultiGraph<'edge>) (targetMappings: (Target<'tnode, 'edge> * Map<int, int>) seq) =
         let targetCount = targetMappings |> Seq.length
         seq {
-            for queryNode in query |> Graph.nodes do
+            for queryNode = 0 to MultiGraph.nodeCount query - 1 do
                 for target, mapping in targetMappings do
                     let mappedTargetNode = mapping.[queryNode]
                     let adjacent = target.Graph |> MultiGraph.adjacent mappedTargetNode
@@ -51,15 +51,15 @@ module QueryBuilder =
         |> Seq.groupBy (fun (node, adjacentLoops, outgoing, incoming, _, _, _) -> node, adjacentLoops, outgoing, incoming)
         |> Seq.map (fun ((node, adjacentLoops, outgoing, incoming), extensions) ->
             let occurences =
-                extensions 
-                |> Seq.map (fun (_, _, _, _, target, mapping, targetNode) -> target, mapping, targetNode) 
-                |> Seq.distinctBy (fun (target, mapping, targetNode) -> target.Graph, mapping, targetNode)
+                extensions
+                |> Seq.map (fun (_, _, _, _, target, mapping, targetNode) -> target, mapping, targetNode)
+                |> Seq.distinctBy (fun (target, mapping, targetNode) -> target.Id, mapping, targetNode)
                 |> Seq.toList
             { QueryNode = node
               AdjacentLoops = adjacentLoops
               Outgoing = outgoing
               Incoming = incoming
-              Fraction = float (Seq.length <| Seq.distinctBy (fun (target, mapping, _) -> target.Graph, mapping) occurences) / float targetCount
+              Fraction = float (List.length <| List.distinctBy (fun (target, mapping, _) -> target.Id, mapping) occurences) / float targetCount
               Occurrences = occurences }
         )
         |> Seq.sortByDescending (fun n -> n.Fraction)

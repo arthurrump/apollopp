@@ -1,398 +1,384 @@
 ﻿module Apollopp
 
+open Argu
 open DirectedSuMGra
 open Graph
 open MultiGraph
+open PatternTree
 open QueryBuilder
+open System
+open System.Collections.Generic
 open System.IO
+open System.Threading.Tasks
 open Thoth.Json.Net
 open TypeGraph
-open PatternTree
 
-let prepareTargets (projectsDir: string) =
-    let times = ResizeArray()
-    let stpwtch = System.Diagnostics.Stopwatch()
-    for project in Directory.EnumerateDirectories(projectsDir) do
-        Path.Combine(project, "source", "graph", "typegraph.json")
-        |> File.ReadAllText
-        |> Decode.fromString (TypeGraph.decoder Decode.string)
-        |> Result.iter (fun graph ->
-            File.Delete(Path.Combine(project, "source", "graph", "typegraph_nodes.json"))
-            printfn "Preparing %s" project
-            stpwtch.Start()
-            let target = Target.fromGraph project graph
-            stpwtch.Stop()
-            times.Add(stpwtch.Elapsed.TotalSeconds)
-            printfn "  %.3fs" stpwtch.Elapsed.TotalSeconds
-            stpwtch.Reset()
-            let targetPath = Path.Combine(project, "source", "graph", "typegraph_target.json")
-            let targetJson = target |> Target.encode Encode.string TypeGraphEdge.encoder |> Encode.toString 0
-            File.WriteAllText(targetPath, targetJson)
+module Task =
+    let map f (t: Task<'t>) =
+        task { let! res = t in return f res }
+
+    let wait (t: Task<'a>) =
+        t.GetAwaiter().GetResult()
+
+type Criterion<'pattern> =
+    { Criterion: string
+      Patterns: PatternTree<'pattern> list }
+
+module Criterion =
+    let mapiPattern f criterion =
+        { Criterion = criterion.Criterion
+          Patterns = List.mapi f criterion.Patterns }
+
+    let encode (encodePattern: Encoder<'pattern>) : Encoder<Criterion<'pattern>> =
+        fun criterion -> Encode.object [
+            "criterion", Encode.string criterion.Criterion
+            "patterns", criterion.Patterns |> List.map (PatternTree.encode encodePattern) |> Encode.list
+        ]
+
+    let decode (decodePattern: Decoder<'pattern>) : Decoder<Criterion<'pattern>> =
+        Decode.object <| fun get ->
+            { Criterion = get.Required.Field "criterion" Decode.string
+              Patterns = get.Required.Field "patterns" (Decode.list (PatternTree.decode decodePattern)) }
+
+let makeTarget (id: string) typegraphFile =
+    task {
+        let! json = File.ReadAllTextAsync typegraphFile
+        return 
+            Decode.fromString (TypeGraph.decode Decode.string) json
+            |> Result.map (Target.fromGraph id)
+    }
+
+let makeTargets (graphPath: string) (skip: int option) (limit: int option) (targetsDir: string) =
+    task {
+        let! results =
+            Directory.EnumerateDirectories targetsDir
+            |> match skip with Some n -> Seq.skip n | None -> id
+            |> match limit with Some n -> Seq.truncate n | None -> id
+            |> Seq.map (fun projectDir ->
+                let typegraphFile = Path.Combine(projectDir, graphPath, "typegraph.json")
+                let id = Path.GetFileName (Path.TrimEndingDirectorySeparator projectDir)
+                makeTarget id typegraphFile |> Task.map (Result.mapError (fun err -> id, err))
+            )
+            |> Task.WhenAll
+        return
+            results
+            |> Seq.map (Result.mapError (fun (id, err) -> printfn "Error loading target %s: %s" id err))
+            |> Seq.choose Result.toOption
+            |> Seq.toList
+    }
+
+let makeCriterion file =
+    task {
+        let! json = File.ReadAllTextAsync file
+        return
+            Decode.fromString (Criterion.decode (TypeGraph.decode Decode.string)) json
+            |> Result.map (Criterion.mapiPattern (fun i -> PatternTree.buildQueries $"query_%d{i}"))
+    }
+
+let makeCriteria (criteriaDir: string) =
+    task {
+        let! results =
+            Directory.EnumerateFiles criteriaDir
+            |> Seq.map (fun file ->
+                makeCriterion file |> Task.map (Result.mapError (fun err -> file, err))
+            )
+            |> Task.WhenAll
+        return
+            results
+            |> Seq.choose Result.toOption
+            |> Seq.toList
+    }
+
+type RunResult = (Verdict * (Query<string, TypeGraphEdge> * Map<int, int>) array) array
+
+let run (criterion: Criterion<Query<string, TypeGraphEdge>>) (target: Target<string, TypeGraphEdge>) : RunResult =
+    Seq.collect (PatternTree.search target) criterion.Patterns
+    |> Seq.groupBy (fun (verdict, _, _) -> verdict)
+    |> Seq.map (fun (verdict, results) ->
+        let results =
+            results
+            |> Seq.map (fun (_, query, mapping) -> query, mapping)
+            |> Seq.toArray
+        verdict, results
+    )
+    |> Seq.sortBy fst
+    |> Seq.toArray
+
+let runAllCriteria (criteria: #seq<Criterion<Query<string, TypeGraphEdge>>>) (target: Target<string, TypeGraphEdge>) =
+    criteria
+    |> Seq.map (fun criterion -> task { return criterion.Criterion, run criterion target })
+    |> Task.WhenAll
+
+let runAllTargets (targets: #seq<Target<string, TypeGraphEdge>>) (criterion: Criterion<Query<string, TypeGraphEdge>>) =
+    targets
+    |> Seq.map (fun target -> task { return target, run criterion target })
+    |> Task.WhenAll
+
+let runAll (targets: #seq<Target<string, TypeGraphEdge>>) (criteria: #seq<Criterion<Query<string, TypeGraphEdge>>>) =
+    targets 
+    |> Seq.map (fun target ->
+        task {
+            let! results = runAllCriteria criteria target
+            return target, results 
+        }
+    ) 
+    |> Task.WhenAll
+
+let writeRunResult (target: Target<string, TypeGraphEdge>) (results: RunResult) (indent: int) (writer: TextWriter) =
+    task {
+        let indentation = String(' ', indent)
+        do! writer.WriteAsync(indentation)
+        do! writer.WriteLineAsync(
+            results
+            |> Seq.map (fun (verdict, mappings) -> $"{verdict}: {mappings.Length}") 
+            |> String.concat " / "
         )
-    times
 
-let readTargets (projectsDir: string) =
-    [ for project in Directory.EnumerateDirectories(projectsDir) ->
-        Path.Combine(project, "source", "graph", "typegraph_target.json")
-        |> File.ReadAllText
-        |> Decode.fromString (Target.decode Decode.string TypeGraphEdge.decoder)
-        |> function 
-           | Ok target -> target 
-           | Error err -> failwith $"Failed to decode typegraph_target for %s{project}: %s{err}" ]
+        for verdict, results in results do
+            if verdict <> Neutral then
+                for query, mapping in results do
+                    do! writer.WriteLineAsync($"{indentation}- {verdict} / {query.Id}")
+                    for (KeyValue (qnode, tnode)) in mapping do
+                        do! writer.WriteLineAsync($"{indentation}  - `{query.NodeArray[qnode]}` ->")
+                        do! writer.WriteLineAsync($"{indentation}    `{target.NodeArray[tnode]}`")
+    }
 
-let prepareTimes1 = prepareTargets "D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/AiC/submissions_cleaned_2020/assessed"
-let prepareTimes2 = prepareTargets "D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/AiC/submissions_cleaned_2022/assessed"
+let writeTargetResults (target: Target<string, TypeGraphEdge>) (results: (string * RunResult) array) (indent: int) (writer: TextWriter) =
+    task {
+        let indentation = String(' ', indent)
+        for criterion, results in results do
+            do! writer.WriteAsync($"{indentation}- ")
+            do! writer.WriteLineAsync(criterion)
+            do! writeRunResult target results (indent + 2) writer
+    }
 
-// let readStpwtch = System.Diagnostics.Stopwatch()
-// readStpwtch.Start()
-// let targets2020 = readTargets "D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/AiC/submissions_cleaned_2020/assessed"
-// let targets2022 = readTargets "D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/AiC/submissions_cleaned_2022/assessed"
-// readStpwtch.Stop()
+let writeCriterionResults (results: (Target<string,TypeGraphEdge> * RunResult) array) (indent: int) (writer: TextWriter) =
+    task {
+        let indentation = String(' ', indent)
+        for target, result in results do
+            do! writer.WriteAsync($"{indentation}- ")
+            do! writer.WriteLineAsync(target.Id)
+            do! writeRunResult target result (indent + 2) writer
 
-// printfn "Prepare time: %.3fs" prepareStpwtch.Elapsed.TotalSeconds
-// printfn "Read time: %.3fs" readStpwtch.Elapsed.TotalSeconds
+        let stats = 
+            let targetCount = results |> Array.length
+            results
+            |> Array.collect snd
+            |> Array.groupBy fst
+            |> Array.map (fun (verdict, results) ->
+                verdict, float (results |> Array.collect snd |> Array.length) / float targetCount
+            )
+            |> Array.sortBy fst
 
-// let [ targets2020Config; targets2020Control ] = targets2020 |> List.splitInto 2
+        do! writer.WriteLineAsync($"{indentation}- Average:")
+        for verdict, avg in stats do
+            do! writer.WriteLineAsync($"{indentation}  %A{verdict}: %.1f{avg}")
+    }
 
-let patterns = [
-    "Includes meaningful randomness (normal distribution and Perlin noise).", [
-    { Verdict = Neutral
-      Pattern = set [
-        ("method", Annotated (InProjectDecl "java+method"), "method")
-        ("method", Invokes, "randomMethod")
-      ]
-      Children = [
-        { Verdict = Positive
-          Pattern = set [ ("randomMethod", Annotated (ExternalDecl "java+method:///processing/core/PApplet/random(float,float)"), "randomMethod") ]
-          Children = [] }
-        { Verdict = Positive
-          Pattern = set [ ("randomMethod", Annotated (ExternalDecl "java+method:///processing/core/PApplet/random(float)"), "randomMethod") ]
-          Children = [] }
-        { Verdict = Positive
-          Pattern = set [ ("randomMethod", Annotated (ExternalDecl "java+method:///processing/core/PApplet/randomGaussian()"), "randomMethod") ]
-          Children = [] }
-        { Verdict = Positive
-          Pattern = set [ ("randomMethod", Annotated (ExternalDecl "java+method:///processing/core/PApplet/noise(float)"), "randomMethod") ]
-          Children = [] }
-        { Verdict = Positive
-          Pattern = set [ ("randomMethod", Annotated (ExternalDecl "java+method:///processing/core/PApplet/noise(float,float)"), "randomMethod") ]
-          Children = [] }
-        { Verdict = Positive
-          Pattern = set [ ("randomMethod", Annotated (ExternalDecl "java+method:///processing/core/PApplet/noise(float,float,float)"), "randomMethod") ]
-          Children = [] }
-      ] }
-    ]
+type UniqueAsyncQueue<'t>() =
+    let itemQueue = Queue<'t>()
+    let requestQueue = Queue<TaskCompletionSource<'t>>()
 
-    "Includes particles.", [
-    { Verdict = Positive
-      Pattern = set [
-        ("Particle", Annotated (InProjectDecl "java+class"), "Particle")
-        ("Particle", Contains, "lifespan")
-        ("lifespan", Annotated (InProjectDecl "java+field"), "lifespan")
-        ("Particle", Contains, "update")
-        ("update", Annotated (InProjectDecl "java+method"), "update")
-        ("update", AccessesField, "lifespan")
-        ("Particle", Contains, "isDead")
-        ("isDead", Annotated (InProjectDecl "java+method"), "isDead")
-        ("isDead", AccessesField, "lifespan")
-        ("isDead", DependsOn, "boolean")
-        ("boolean", Annotated (ExternalDecl "java+primitiveType:///boolean"), "boolean")
-        
-        ("ParticleSystem", Annotated (InProjectDecl "java+class"), "ParticleSystem")
-        ("ParticleSystem", Contains, "particles")
-        ("particles", Annotated (InProjectDecl "java+field"), "particles")
-        ("particles", DependsOn, "Particle")
-        ("particles", DependsOn, "ArrayList")
-        ("ArrayList", Annotated (ExternalDecl "java+class:///java/util/ArrayList"), "ArrayList")
-        ("ParticleSystem", Contains, "run")
-        ("run", AccessesField, "particles")
-        ("run", Invokes, "isDead")
-      ]
-      Children = [
-        { Verdict = Neutral
-          Pattern = set [
-            ("isDead", Contains, "someParam")
-            ("someParam", Annotated (InProjectDecl "java+parameter"), "someParam")
-          ]
-          Children = [] }
-      ] }
-    ]
+    member this.Enqueue (item: 't) =
+        lock this <| fun () ->
+            if requestQueue.Count > 0 then
+                requestQueue.Dequeue().SetResult item
+            elif not (itemQueue.Contains item) then
+                itemQueue.Enqueue item
 
-    "Includes flocking", [
-    { Verdict = Positive
-      Pattern = set [
-        ("Flock", Annotated (InProjectDecl "java+class"), "Flock")
-        ("Flock", DependsOn, "Boid")
-        ("Flock", Contains, "run")
-        ("run", Annotated (InProjectDecl "java+method"), "run")
-        ("run", Invokes, "flockingMethod")
-        ("Boid", Annotated (InProjectDecl "java+class"), "Boid")
-        ("Boid", Contains, "flockingMethod")
-        ("flockingMethod", Annotated (InProjectDecl "java+method"), "flockingMethod")
-        ("flockingMethod", Contains, "boidsParam")
-        ("boidsParam", Annotated (InProjectDecl "java+parameter"), "boidsParam")
-        ("boidsParam", DependsOn, "ArrayList")
-        ("ArrayList", Annotated (ExternalDecl "java+class:///java/util/ArrayList"), "ArrayList")
-        ("boidsParam", DependsOn, "Boid")
-      ]
-      Children = [] }
-    ]
+    member this.DequeueAsync () =
+        lock this <| fun () ->
+            if itemQueue.Count > 0 then
+                task { return itemQueue.Dequeue() }
+            else
+                let tcs = TaskCompletionSource<'t>()
+                requestQueue.Enqueue tcs
+                tcs.Task
 
-    "Do not use unnecessary global variables, especially not for value passing.", [
-    { Verdict = Negative
-      Pattern = set [
-        ("PApplet", Annotated (ExternalDecl "java+class:///processing/core/PApplet"), "PApplet")
-        ("mainTab", Annotated (InProjectDecl "java+class"), "mainTab")
-        ("mainTab", Extends, "PApplet")
-        ("globalVar", Annotated (InProjectDecl "java+field"), "globalVar")
-        ("mainTab", Contains, "globalVar")
-        ("otherClass", Annotated (InProjectDecl "java+class"), "otherClass")
-        ("otherClass", AccessesField, "globalVar")
-      ]
-      Children = [
-        { Verdict = Neutral
-          Pattern = set [
-            ("globalVar", Annotated (Modifier "final"), "globalVar")
-          ]
-          Children = [] }
-        { Verdict = Negative
-          Pattern = set [
-            ("otherClass2", Annotated (InProjectDecl "java+class"), "otherClass2")
-            ("otherClass2", AccessesField, "globalVar")
-          ]
-          Children = [
-            { Verdict = Neutral
-              Pattern = set [
-                ("globalVar", Annotated (Modifier "final"), "globalVar")
-              ]
-              Children = [] }
-          ] }
-      ] }
-    ]
+let watchCriteria (run: Criterion<Query<string, TypeGraphEdge>> -> unit) (criteriaDir: string) =
+    task {
+        use watcher = new FileSystemWatcher(criteriaDir)
+        watcher.IncludeSubdirectories <- true
 
-    "Do not hide user interaction in classes.", [
-    { Verdict = Positive
-      Pattern = set [
-        ("PApplet", Annotated (ExternalDecl "java+class:///processing/core/PApplet"), "PApplet")
-        ("mainTab", Annotated (InProjectDecl "java+class"), "mainTab")
-        ("mainTab", Extends, "PApplet")
-        ("mainTab", Contains, "method")
-        ("method", Annotated (InProjectDecl "java+method"), "method")
-        ("method", Overrides, "PApplet.method")
-      ]
-      Children = [
-        { Verdict = Neutral
-          Pattern = set [ ("PApplet.method", Annotated (ExternalDecl "java+method:///processing/core/PApplet/setup()"), "PApplet.method") ]
-          Children = [] }
-        { Verdict = Neutral
-          Pattern = set [ ("PApplet.method", Annotated (ExternalDecl "java+method:///processing/core/PApplet/draw()"), "PApplet.method") ]
-          Children = [] }
-        { Verdict = Neutral
-          Pattern = set [ ("PApplet.method", Annotated (ExternalDecl "java+method:///processing/core/PApplet/settings()"), "PApplet.method") ]
-          Children = [] }
-      ] }
-    { Verdict = Neutral
-      Pattern = set [
-        ("method", AccessesField, "field")
-        ("method", Annotated (InProjectDecl "java+method"), "method")
-      ]
-      Children = 
-        [ "key"; "keyCode"; "keyPressed"; "mouseButton"; "mousePressed"; "mouseX"; "mouseY"; "pmouseX"; "pmouseY" ]
-        |> List.map (fun field -> 
-            { Verdict = Negative
-              Pattern = set [ ("field", Annotated (ExternalDecl $"java+field:///processing/core/PApplet/%s{field}"), "field") ]
-              Children = 
-                [ "keyPressed()"; "keyReleased()"; "keyTyped()"; "mouseClicked()"; "mouseDragged()"; "mouseMoved()"; "mousePressed()"; "mouseReleased()"; "mouseWheel()" ]
-                |> List.map (fun method ->
-                    { Verdict = Neutral
-                      Pattern = set [
-                        ("PApplet", Annotated (ExternalDecl "java+class:///processing/core/PApplet"), "PApplet")
-                        ("mainTab", Annotated (InProjectDecl "java+class"), "mainTab")
-                        ("mainTab", Extends, "PApplet")
-                        ("mainTab", Contains, "method")
-                        ("method", Overrides, "PApplet.method")
-                        ("PApplet.method", Annotated (ExternalDecl $"java+method:///processing/core/PApplet/%s{method}"), "PApplet.method")
-                      ]
-                      Children = [] }
-                ) }
-        ) }
-    ]
+        let fileQueue = UniqueAsyncQueue<string>()
+        watcher.Changed.Add (fun event -> fileQueue.Enqueue event.FullPath)
 
-    "How many classes are there?", [
-    { Verdict = Positive
-      Pattern = set [
-        ("class", Annotated (InProjectDecl "java+class"), "class")
-      ]
-      Children = [] }
-    ]
+        watcher.EnableRaisingEvents <- true
 
-    "How much interaction is between the classes. Does an event in one class have an effect on objects of other class?", [
-    { Verdict = Positive
-      Pattern = set [
-        ("class1", Annotated (InProjectDecl "java+class"), "class1")
-        ("class2", Annotated (InProjectDecl "java+class"), "class2")
-        ("class2", Contains, "method2")
-        ("method2", Annotated (InProjectDecl "java+method"), "method2")
-        ("class1", Invokes, "method2")
-      ]
-      Children = [
-        { Verdict = Neutral
-          Pattern = set [ 
-            ("PApplet", Annotated (ExternalDecl "java+class:///processing/core/PApplet"), "PApplet")
-            ("class1", Extends, "PApplet")
-          ]
-          Children = [] } 
-      ] }
-    ]
+        while true do
+            let! file = fileQueue.DequeueAsync()
+            printfn ""
+            printfn "%s> %s" (DateTime.Now.ToShortTimeString()) file
+            try
+                match! makeCriterion file with
+                | Ok criterion ->
+                    run criterion
+                | Error err ->
+                    printfn "Error loading criterion: %s" err
+            with err ->
+                printfn "Error running criterion: %s" err.Message
+    }
 
-    "Do not have unused code", [
-    { Verdict = Negative
-      Pattern = set [
-        ("method", Annotated (InProjectDecl "java+method"), "method")
-      ]
-      Children = [
-        { Verdict = Neutral
-          Pattern = set [
-            ("other", Invokes, "method")
-          ]
-          Children = [] }
-        { Verdict = Neutral
-          Pattern = set [
-            ("method", Overrides, "other")
-          ]
-          Children = [] }
-        { Verdict = Neutral
-          Pattern = set [
-            ("PApplet.main", Annotated (ExternalDecl "java+method:///processing/core/PApplet/main(java.lang.String%5B%5D)"), "PApplet.main")
-            ("method", Invokes, "PApplet.main")
-          ]
-          Children = [] }
-      ] }
-    ]
+let findExtensions (results: (Target<string,TypeGraphEdge> * RunResult) array) =
+    let inline selectExtensions (extensions: 't seq when 't : (member Fraction : float)) =
+        seq {
+            let mutable highCount = 0
+            let mutable middleCount = 0
+            for ext in extensions do
+                if highCount < 3 then
+                    highCount <- highCount + 1
+                    yield ext
+                elif middleCount < 3 && ext.Fraction < 0.6 then
+                    middleCount <- middleCount + 1
+                    yield ext
+        }
 
-    "Use functions when you have similar code.", [
-    { Verdict = Positive
-      Pattern = set [
-        ("reusedMethod", Annotated (InProjectDecl "java+method"), "reusedMethod")
-        ("caller1", Invokes, "reusedMethod")
-        ("caller1", Annotated (InProjectDecl "java+method"), "caller1")
-        ("caller2", Invokes, "reusedMethod")
-        ("caller2", Annotated (InProjectDecl "java+method"), "caller2")
-      ]
-      Children = [] }
-    ]
-]
+    results
+    |> Seq.collect (fun (target, runResults) ->
+        runResults 
+        |> Seq.collect snd
+        |> Seq.map (fun (query, mapping) -> query, target, mapping)
+    )
+    |> Seq.groupBy (fun (query, _, _) -> query)
+    |> Seq.map (fun (query, mappings) -> 
+        let mappings = Seq.map (fun (_, target, mapping) -> target, mapping) mappings |> Seq.toArray
+        let edgeExtensions = 
+            QueryBuilder.findEdgeExtensions (MultiGraph.toIntGraph query.Graph) mappings
+            |> selectExtensions
+        let nodeExtensions =
+            QueryBuilder.findNodeExtensions query.Graph mappings
+            |> selectExtensions
+        query, edgeExtensions, nodeExtensions)
+    |> Seq.sortBy (fun (query, _, _) -> query.Id)
 
-// let patternQueries = 
-//     patterns
-//     |> List.map (fun (criterion, patterns) ->
-//         criterion, List.map PatternTree.buildQueries patterns
-//     )
+let writeExtensions (extensions: #seq<Query<string, TypeGraphEdge> * #seq<EdgeExtension<TypeGraphEdge>> * #seq<NodeExtension<string, TypeGraphEdge>>>) (indent: int) (writer: TextWriter) =
+    task {
+        let indentation = String(' ', indent)
 
-// let projects = List.append targets2020Control targets2022
-// let times = ResizeArray()
+        do! writer.WriteLineAsync($"{indentation}Suggested extensions:")
+        for query, edgeExtensions, nodeExtensions in extensions do
+            do! writer.WriteLineAsync($"{indentation}- %s{query.Id}")
+            do! writer.WriteLineAsync($"{indentation}  Edges:")
+            for ext in edgeExtensions do
+                do! writer.WriteLineAsync($"{indentation}  - [%.2f{ext.Fraction}]")
+                do! writer.WriteLineAsync($"{indentation}    %A{query.NodeArray[Edge.from ext.Edge]}")
+                do! writer.WriteLineAsync($"{indentation}    > %A{Edge.edge ext.Edge} >")
+                do! writer.WriteLineAsync($"{indentation}    %A{query.NodeArray[Edge.to' ext.Edge]}")
+            do! writer.WriteLineAsync($"{indentation}  Nodes:")
+            for ext in nodeExtensions do
+                do! writer.WriteLineAsync($"{indentation}  - [%.2f{ext.Fraction}]")
+                do! writer.WriteLineAsync($"{indentation}    %A{query.NodeArray[ext.QueryNode]}")
+                for edge in ext.Outgoing do
+                    do! writer.WriteLineAsync($"{indentation}    > %A{edge} >")
+                for edge in ext.Incoming do
+                    do! writer.WriteLineAsync($"{indentation}    < %A{edge} <")
+                for edge in ext.AdjacentLoops do
+                    do! writer.WriteLineAsync($"{indentation}    | %A{edge} |")
+                for target, _, targetNode in ext.Occurrences |> Seq.distinctBy (fun (target, _, _) -> target.Id) |> Seq.truncate 3 do
+                    do! writer.WriteLineAsync($"{indentation}    = %A{target.NodeArray[targetNode]}")
+                    do! writer.WriteLineAsync($"{indentation}      in %A{target.Id}")
+    }
 
-// for projectTarget in projects do
-//     printfn "%s" projectTarget.Id
-//     let stpwtch = System.Diagnostics.Stopwatch()
-//     stpwtch.Start()
-//     use resultsFile = File.CreateText(Path.Combine(projectTarget.Id, "apollopp.md"))
-//     for criterion, patterns in patternQueries do
-//         resultsFile.Write("## "); resultsFile.WriteLine(criterion)
-//         let results =
-//             Seq.collect (PatternTree.search projectTarget) patterns
-//             |> Seq.groupBy (fun (verdict, _, _) -> verdict)
-//             |> Seq.map (fun (verdict, results) ->
-//                 let results =
-//                     results
-//                     |> Seq.map (fun (_, query, mapping) -> query, mapping)
-//                     |> Seq.toArray
-//                 verdict, results
-//             )
-//             |> Seq.toArray
-//         results 
-//         |> Seq.map (fun (verdict, mappings) -> $"{verdict}: {mappings.Length}") 
-//         |> String.concat " / "
-//         |> resultsFile.WriteLine
-//         for verdict, results in results do
-//             if verdict <> Neutral then
-//                 for query, mapping in results do
-//                     resultsFile.WriteLine($"- {verdict} / {query.Id}")
-//                     for (KeyValue (qnode, tnode)) in mapping do
-//                         resultsFile.WriteLine($"  - `{query.NodeArray[qnode]}` ->")
-//                         resultsFile.WriteLine($"    `{projectTarget.NodeArray[tnode]}`")
-//     stpwtch.Stop()
-//     printfn "%.3fs" stpwtch.Elapsed.TotalSeconds
-//     times.Add(stpwtch.Elapsed.TotalSeconds)
+type ConfigureArgs =
+    | [<Unique; AltCommandLine("-o")>] Output of path: string
+    interface IArgParserTemplate with
+        member this.Usage =
+            match this with
+            | Output _ -> "Output file for results"
 
-let printStatistics times =
-    printfn "Timings:"
-    printfn " Min: %.3fs" (times |> Seq.min)
-    printfn " Max: %.3fs" (times |> Seq.max)
-    let average = times |> Seq.average
-    printfn " Average: %.3fs" average
-    let stddev = 
-        let diffSqSum = Seq.sumBy (fun time -> pown (time - average) 2) times
-        sqrt (diffSqSum / float (Seq.length times - 1))
-    printfn " StdDev: %.3fs" stddev
+type RunArgs =
+    | [<Unique; AltCommandLine("-o")>] Output of path: string
 
-// printStatistics times
+    interface IArgParserTemplate with
+        member this.Usage =
+            match this with
+            | Output _ -> "Output directory for the results"
 
-let prepareTimes = Seq.append prepareTimes1 prepareTimes2
-printStatistics prepareTimes
-prepareTimes |> Seq.sort |> Seq.iter (printfn "%.3fs")
+type Args =
+    | [<CliPrefix(CliPrefix.None)>] Configure of ParseResults<ConfigureArgs>
+    | [<CliPrefix(CliPrefix.None)>] Run of ParseResults<RunArgs>
+    | [<Inherit; Mandatory; Unique; AltCommandLine("-c")>] Criteria of path: string
+    | [<Inherit; Mandatory; Unique; AltCommandLine("-t")>] Targets of path: string
+    | [<Inherit; Unique>] Graph_Path of path: string
+    | [<Inherit; Unique>] Skip of n: int
+    | [<Inherit; Unique>] Limit of n: int
 
-// let results = 
-//     targets2020Config
-//     |> List.map (fun target -> 
-//         let results =
-//             PatternTree.search target patternQuery 
-//             |> Seq.groupBy (fun (verdict, _, _) -> verdict)
-//             |> Seq.map (fun (verdict, results) -> 
-//                 let results =
-//                     results 
-//                     |> Seq.map (fun (_, query, mapping) -> query, mapping)
-//                     |> Seq.toList
-//                 verdict, results
-//             )
-//             |> Seq.toList
-//         target, results
-//     )
+    interface IArgParserTemplate with
+        member this.Usage =
+            match this with
+            | Configure _ -> "Interactively configure patterns"
+            | Run _ -> "Run patterns on targets"
+            | Criteria _ -> "Path to the directory containing JSON criterion files"
+            | Targets _ -> "Path to the directory containing target projects"
+            | Graph_Path _ -> "Path to the directory within a project containing JSON graph files, defaults to source/graph"
+            | Skip _ -> "Skip the first n targets"
+            | Limit _ -> "Limit the number of targets to n"
 
-// for target, results in results do
-//     printfn "- %s" target.Id
-//     for verdict, results in results do
-//         printfn "  %A: %i" verdict (results |> List.length)
-//         for query, mapping in results do
-//             for i, (qnode, tnode) in mapping |> Map.toSeq |> Seq.indexed do
-//                 if i = 0 then printf "  - " else printf "    "
-//                 printfn "(%s) %A -> %s" query.Id query.NodeArray[qnode] target.NodeArray[tnode]
+[<EntryPoint>]
+let main args =
+    let argParser = ArgumentParser.Create<Args>()
+    try
+        let args = argParser.ParseCommandLine(inputs = args, raiseOnUsage = true)
 
-// let stats = 
-//     let targetCount = results |> List.length
-//     results
-//     |> List.collect snd
-//     |> List.groupBy fst
-//     |> List.map (fun (verdict, results) ->
-//         verdict, float (results |> List.collect snd |> List.length) / float targetCount
-//     )
+        let graphPath = 
+            args.TryGetResult <@ Graph_Path @>
+            |> Option.defaultValue "source/graph"
+        let skip = args.TryGetResult <@ Skip @>
+        let limit = args.TryGetResult <@ Limit @>
 
-// printfn "- Average:"
-// for verdict, avg in stats do
-//     printfn "  %A: %.1f" verdict avg
+        let targetsDir = args.GetResult <@ Targets @>
+        let criteriaDir = args.GetResult <@ Criteria @>
 
-// for mapping in mappings do
-//     printfn "Mapping:"
-//     for key, value in mapping |> Map.toSeq |> Seq.sortBy fst do
-//         printfn "%2i -> %2i (%i -> %s)" key value queryNodes.[key] targetNodes.[value]
-
-// printfn "Suggested edges:"
-// for ext in QueryBuilder.findEdgeExtensions queryGraph (mappings |> Seq.map (fun mapping -> target, mapping)) do
-//     printfn "%A" ext
-
-// printfn "Suggested nodes:"
-// for ext in QueryBuilder.findNodeExtensions queryGraph (mappings |> Seq.map (fun mapping -> target, mapping)) do
-//     printfn "- %f: %A -> %A\n  Outgoing: %A\n  Incoming: %A" ext.Fraction ext.QueryNode ext.AdjacentLoops ext.Outgoing ext.Incoming
-//     printfn "  Occurrences:"
-//     for target, mapping, node in ext.Occurrences do
-//         printfn "  - %A: %A -> (new) %A" (target.Graph.Length) (mapping.[ext.QueryNode]) node
+        match args.TryGetSubCommand() with
+        | Some (Configure _) ->
+            Task.wait <| task {
+                printf "Reading targets... "
+                let! targets = makeTargets graphPath skip limit targetsDir
+                printfn "Done."
+                let run criterion =
+                    Task.wait <| task {
+                        let! results = runAllTargets targets criterion
+                        do! writeCriterionResults results 0 Console.Out
+                        let extensions = findExtensions results
+                        do! writeExtensions extensions 0 Console.Out
+                    }
+                printfn "Start watching %s." criteriaDir
+                do! watchCriteria run criteriaDir
+            }
+            0
+        | Some (Run runArgs) ->
+            Task.wait <| task {
+                printf "Reading targets... "
+                let! targets = makeTargets graphPath skip limit targetsDir
+                printfn "Done."
+                printf "Reading criteria... "
+                let! criteria = makeCriteria criteriaDir
+                printfn "Done."
+                let getWriter: string -> TextWriter * (unit -> unit) =
+                    match runArgs.TryGetResult <@ Output @> with
+                    | Some outputDir ->
+                        if not (Directory.Exists outputDir) then Directory.CreateDirectory outputDir |> ignore
+                        fun targetId ->
+                            let path = Path.Combine(outputDir, $"{Path.GetFileName (Path.TrimEndingDirectorySeparator targetId)}.md")
+                            let file = File.CreateText(path)
+                            file, file.Dispose
+                    | None ->
+                        fun targetId ->
+                            printfn ""
+                            printfn "# %s" targetId
+                            Console.Out, fun () -> ()
+                let! results = runAll targets criteria
+                for targets, results in results do
+                    let writer, dispose = getWriter targets.Id
+                    try
+                        do! writeTargetResults targets results 0 writer
+                    finally
+                        dispose ()
+            }
+            0
+        | Some _ | None ->
+            printfn "%s" (argParser.PrintUsage(message = "Please specify a subcommand"))
+            1
+    with e ->
+        printfn "%s" e.Message
+        1

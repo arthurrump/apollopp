@@ -17,6 +17,7 @@
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Argu" Version="6.1.1" />
     <PackageReference Include="FSharp.SystemTextJson" Version="1.2.34" />
     <PackageReference Include="Thoth.Json.Net" Version="11.0.0" />
   </ItemGroup>

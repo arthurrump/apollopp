@@ -3,6 +3,7 @@
 open Argu
 open DirectedSuMGra
 open Graph
+open Microsoft.ClearScript.V8
 open MultiGraph
 open PatternTree
 open QueryBuilder
@@ -67,9 +68,19 @@ let makeTargets (graphPath: string) (skip: int option) (limit: int option) (targ
             |> Seq.toList
     }
 
-let makeCriterion file =
+let makeCriterion (file: string) =
     task {
-        let! json = File.ReadAllTextAsync file
+        let! content = File.ReadAllTextAsync file
+        let json =
+            match Path.GetExtension file with
+            | ".json" ->
+                content
+            | ".js" ->
+                use jsEngine = new V8ScriptEngine()
+                jsEngine.Execute(content)
+                jsEngine.Evaluate("JSON.stringify(criterion)") :?> string
+            | _ ->
+                failwith "Unknown file type."
         return
             Decode.fromString (Criterion.decode (TypeGraph.decode Decode.string)) json
             |> Result.map (Criterion.mapiPattern (fun i -> PatternTree.buildQueries $"query_%d{i}"))

@@ -1,0 +1,27 @@
+A major part of significant complexity has to be written by yourself.
+At least two (nontrivial) classes have to be written by yourself.
+Attention for details.
+Combines at least 3 from the 4 topics in one application.
+Do not hard code parameters that may change during the program development. Also do not hardcode graphical elements that might change.
+Do not have unused code.
+Do not have unused variables.
+Do not hide user interaction in classes. Deal with user interaction in the following way: …
+Do not use unnecessary global variables, especially not for value passing.
+Efficiency
+Flocking and particles should not both be from Shiffman (or other sources on the web).
+Functional correctness.
+Have comments and a header.
+Have constants for your program as global variables (e.g. number of players, etc.), not hidden in classes.
+Have things that belong together logically, in one class.
+How many classes are there?
+How much interaction is between the classes. Does an event in one class have an effect on objects of other class?
+How much interaction is there with the user.
+Includes flocking.
+Includes meaningful randomness (normal distribution and Perlin noise).
+Includes particles.
+Includes use of forces, with difficulty at least equivalent to catapult, billiard or mass-spring-damper systems.
+Keep the main draw function as small as possible.
+Quote the sources that you use.
+Use arrays (and loops) when you have similar values.
+Use functions when you have similar code.
+When classes or methods become too large, split them in a logical way.

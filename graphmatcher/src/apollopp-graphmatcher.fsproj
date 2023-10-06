@@ -21,6 +21,7 @@
     <PackageReference Include="FSharp.SystemTextJson" Version="1.2.34" />
     <PackageReference Include="Microsoft.ClearScript.Complete" Version="7.4.3" />
     <PackageReference Include="Polly.Core" Version="8.0.0" />
+    <PackageReference Include="System.Reactive" Version="6.0.0" />
     <PackageReference Include="Thoth.Json.Net" Version="11.0.0" />
   </ItemGroup>
 </Project>

@@ -11,6 +11,7 @@ open QueryBuilder
 open System
 open System.Collections.Generic
 open System.IO
+open System.Reactive.Linq
 open System.Threading.Tasks
 open Thoth.Json.Net
 open TypeGraph
@@ -208,7 +209,8 @@ type UniqueAsyncQueue<'t>() =
     member this.DequeueAsync () =
         lock this <| fun () ->
             if itemQueue.Count > 0 then
-                task { return itemQueue.Dequeue() }
+                itemQueue.Dequeue()
+                |> Task.FromResult
             else
                 let tcs = TaskCompletionSource<'t>()
                 requestQueue.Enqueue tcs
@@ -219,8 +221,18 @@ let watchCriteria (run: Criterion<Query<string, TypeGraphEdge>> -> unit) (criter
         use watcher = new FileSystemWatcher(criteriaDir)
         watcher.IncludeSubdirectories <- true
 
+        let events = 
+            Observable.FromEventPattern<FileSystemEventHandler, FileSystemEventArgs>(
+                (fun handler -> watcher.Changed.AddHandler handler), 
+                (fun handler -> watcher.Changed.RemoveHandler handler)
+            )
+
         let fileQueue = UniqueAsyncQueue<string>()
-        watcher.Changed.Add (fun event -> fileQueue.Enqueue event.FullPath)
+        use subscription =
+            events
+                .GroupBy(fun event -> event.EventArgs.FullPath)
+                .SelectMany(fun group -> group.Throttle(TimeSpan.FromMilliseconds(100)))
+                .Subscribe(fun event -> fileQueue.Enqueue event.EventArgs.FullPath)
 
         watcher.EnableRaisingEvents <- true
 

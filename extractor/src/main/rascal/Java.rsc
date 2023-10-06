@@ -18,8 +18,6 @@ TypeGraph[loc] createTypeGraph(M3 model) {
     return graphs::TypeGraph::createTypeGraph(model, annotateDefaults(model, relid({ "Listener", "View", "Controller" })));
 }
 
-loc ss2022 = |file://D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/SS/submissions_cleaned/submissions|;
-
 void writeProjectTypeGraphs(loc dir) {
     for (proj <- dir.ls) {
         println("Creating TypeGraph for " + proj.uri);

@@ -22,9 +22,6 @@ TypeGraph[loc] createTypeGraph(M3 model) {
     return graphs::TypeGraph::createTypeGraph(model, annotateDefaults(model, relid({ "Particle", "System", "Flock", "Boid" })));
 }
 
-loc aic2020 = |file://D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/AiC/submissions_cleaned_2020/assessed|;
-loc aic2022 = |file://D:/Arthur/OneDrive/UTwente/Master/Y2Thesis/Data/AiC/submissions_cleaned_2022/assessed|;
-
 list[loc] getProjects(loc dir) {
     return [ proj + "source" | proj <- dir.ls ];
 }

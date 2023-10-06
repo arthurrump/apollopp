@@ -216,7 +216,7 @@ type UniqueAsyncQueue<'t>() =
                 requestQueue.Enqueue tcs
                 tcs.Task
 
-let watchCriteria (run: Criterion<Query<string, TypeGraphEdge>> -> unit) (criteriaDir: string) =
+let watchCriteria (run: Criterion<Query<string, TypeGraphEdge>> -> Task<unit>) (criteriaDir: string) =
     task {
         use watcher = new FileSystemWatcher(criteriaDir)
         watcher.IncludeSubdirectories <- true
@@ -243,7 +243,7 @@ let watchCriteria (run: Criterion<Query<string, TypeGraphEdge>> -> unit) (criter
             try
                 match! makeCriterion file with
                 | Ok criterion ->
-                    run criterion
+                    do! run criterion
                 | Error err ->
                     printfn "Error loading criterion: %s" err
             with err ->
@@ -361,18 +361,33 @@ let main args =
         let criteriaDir = args.GetResult <@ Criteria @>
 
         match args.TryGetSubCommand() with
-        | Some (Configure _) ->
+        | Some (Configure confArgs) ->
             Task.wait <| task {
                 printf "Reading targets... "
                 let! targets = makeTargets graphPath skip limit targetsDir
                 printfn "Done."
+
+                let getOutWriter =
+                    match confArgs.TryGetResult <@ ConfigureArgs.Output @> with
+                    | Some outputFile ->
+                        fun _ ->
+                            let file = File.Open(outputFile, FileMode.Create, FileAccess.Write, FileShare.Read)
+                            let writer = new StreamWriter(file)
+                            let dispose = fun _ -> writer.Dispose(); file.Dispose()
+                            writer :> TextWriter, dispose
+                    | None ->
+                        fun _ -> Console.Out, fun _ -> ()
+                
                 let run criterion =
-                    Task.wait <| task {
+                    task {
+                        let outWriter, disposeOutWriter = getOutWriter ()
                         let! results = runAllTargets targets criterion
-                        do! writeCriterionResults results 0 Console.Out
+                        do! writeCriterionResults results 0 outWriter
                         let extensions = findExtensions results
-                        do! writeExtensions extensions 0 Console.Out
+                        do! writeExtensions extensions 0 outWriter
+                        disposeOutWriter ()
                     }
+                
                 printfn "Start watching %s." criteriaDir
                 do! watchCriteria run criteriaDir
             }
@@ -386,7 +401,7 @@ let main args =
                 let! criteria = makeCriteria criteriaDir
                 printfn "Done."
                 let getWriter: string -> TextWriter * (unit -> unit) =
-                    match runArgs.TryGetResult <@ Output @> with
+                    match runArgs.TryGetResult <@ RunArgs.Output @> with
                     | Some outputDir ->
                         if not (Directory.Exists outputDir) then Directory.CreateDirectory outputDir |> ignore
                         fun targetId ->

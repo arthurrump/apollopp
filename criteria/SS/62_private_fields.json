@@ -1,0 +1,33 @@
+{
+  "criterion": "All fields except constants are private.",
+  "patterns": [
+    {
+      "verdict": "negative",
+      "pattern": [
+        [ "field", { "annotation": { "scheme": "java+field" } }, "field" ]
+      ],
+      "children": [
+        {
+          "verdict": "positive",
+          "pattern": [
+            [ "field", { "annotation": { "modifier": "private" } }, "field" ]
+          ],
+          "children": [
+            {
+              "verdict": "neutral",
+              "pattern": [
+                [ "field", { "annotation": { "modifier": "final" } }, "field" ]
+              ]
+            }
+          ]
+        },
+        {
+          "verdict": "neutral",
+          "pattern": [
+            [ "field", { "annotation": { "modifier": "final" } }, "field" ]
+          ]
+        }
+      ]
+    }
+  ]
+}

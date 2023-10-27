@@ -1,0 +1,23 @@
+{
+  "criterion": "Includes flocking.",
+  "patterns": [
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "Flock", { "annotation": { "scheme": "java+class" } }, "Flock" ],
+        [ "Flock", "dependsOn", "Boid" ],
+        [ "Flock", "contains", "run" ],
+        [ "run", { "annotation": { "scheme": "java+method" } }, "run" ],
+        [ "run", "invokes", "flockingMethod" ],
+        [ "Boid", { "annotation": { "scheme": "java+class" } }, "Boid" ],
+        [ "Boid", "contains", "flockingMethod" ],
+        [ "flockingMethod", { "annotation": { "scheme": "java+method" } }, "flockingMethod" ],
+        [ "flockingMethod", "contains", "boidsParam" ],
+        [ "boidsParam", { "annotation": { "scheme": "java+parameter" } }, "boidsParam" ],
+        [ "boidsParam", "dependsOn", "ArrayList" ],
+        [ "ArrayList", { "annotation": { "location": "java+class:///java/util/ArrayList" } }, "ArrayList" ],
+        [ "boidsParam", "dependsOn", "Boid" ]
+      ]
+    }
+  ]
+}

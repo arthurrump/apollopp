@@ -1,0 +1,19 @@
+{
+  "criterion": "A creational pattern such as the Factory pattern or dependency injection is used appropriately.",
+  "patterns": [
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "injectee", { "annotation": { "scheme": "java+class" } }, "injectee" ],
+        [ "injecteeConstructor", { "annotation": { "scheme": "java+constructor" } }, "injecteeConstructor" ],
+        [ "injectee", "contains", "injecteeConstructor" ],
+        [ "injecteeParam", { "annotation": { "scheme": "java+parameter" } }, "injecteeParam" ],
+        [ "injecteeConstructor", "contains", "injecteeParam" ],
+        [ "injecteeField", { "annotation": { "scheme": "java+field" } }, "injecteeField" ],
+        [ "injectee", "contains", "injecteeField" ],
+        [ "injecteeParam", "dependsOn", "injectedType" ],
+        [ "injecteeField", "dependsOn", "injectedType" ]
+      ]
+    }
+  ]
+}

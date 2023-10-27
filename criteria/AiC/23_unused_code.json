@@ -1,0 +1,36 @@
+{
+  "criterion": "Do not have unused code",
+  "patterns": [
+    {
+      "verdict": "negative",
+      "pattern": [
+        [ "method", { "annotation": { "scheme": "java+method" } }, "method" ]
+      ],
+      "children": [
+        {
+          "verdict": "neutral",
+          "pattern": [
+            [ "other", "invokes", "method" ]
+          ]
+        },
+        {
+          "verdict": "neutral",
+          "pattern": [
+            [ "method", "overrides", "other" ]
+          ]
+        },
+        {
+          "verdict": "neutral",
+          "pattern": [
+            [
+              "PApplet.main",
+              { "annotation": { "location": "java+method:///processing/core/PApplet/main(java.lang.String%5B%5D)" } },
+              "PApplet.main"
+            ],
+            [ "method", "invokes", "PApplet.main" ]
+          ]
+        }
+      ]
+    }
+  ]
+}

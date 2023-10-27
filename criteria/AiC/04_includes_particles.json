@@ -1,0 +1,39 @@
+{
+  "criterion": "Includes particles.",
+  "patterns": [
+    { 
+      "verdict": "positive",
+      "pattern": [
+        [ "Particle", { "annotation": { "scheme": "java+class" } }, "Particle" ],
+        [ "Particle", "contains", "lifespan" ],
+        [ "lifespan", { "annotation": { "scheme": "java+field" } }, "lifespan" ],
+        [ "Particle", "contains", "update" ],
+        [ "update", { "annotation": { "scheme": "java+method" } }, "update" ],
+        [ "update", "accessesField", "lifespan" ],
+        [ "Particle", "contains", "isDead" ],
+        [ "isDead", { "annotation": { "scheme": "java+method" } }, "isDead" ],
+        [ "isDead", "accessesField", "lifespan" ],
+        [ "isDead", "dependsOn", "boolean" ],
+        [ "boolean", { "annotation": { "location": "java+primitiveType:///boolean" } }, "boolean" ],
+        [ "ParticleSystem", { "annotation": { "scheme": "java+class" } }, "ParticleSystem" ],
+        [ "ParticleSystem", "contains", "particles" ],
+        [ "particles", { "annotation": { "scheme": "java+field" } }, "particles" ],
+        [ "particles", "dependsOn", "Particle" ],
+        [ "particles", "dependsOn", "ArrayList" ],
+        [ "ArrayList", { "annotation": { "location": "java+class:///java/util/ArrayList" } }, "ArrayList" ],
+        [ "ParticleSystem", "contains", "run" ],
+        [ "run", "accessesField", "particles" ],
+        [ "run", "invokes", "isDead" ]
+      ],
+      "children": [
+        {
+          "verdict": "neutral",
+          "pattern": [
+            [ "isDead", "contains", "someParam" ],
+            [ "someParam", { "annotation": { "scheme": "java+parameter" } }, "someParam" ]
+          ]
+        }
+      ]
+    }
+  ]
+}

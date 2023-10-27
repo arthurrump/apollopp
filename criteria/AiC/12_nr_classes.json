@@ -1,0 +1,11 @@
+{
+  "criterion": "How many classes are there?",
+  "patterns": [
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "class", { "annotation": { "scheme": "java+class" } }, "class" ]
+      ]
+    }
+  ]
+}

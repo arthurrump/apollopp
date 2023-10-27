@@ -1,0 +1,25 @@
+{
+  "criterion": "Do not use unnecessary global variables, especially not for value passing.",
+  "patterns": [
+    {
+      "verdict": "negative",
+      "pattern": [
+        [ "PApplet", { "annotation": { "location": "java+class:///processing/core/PApplet" } }, "PApplet" ],
+        [ "mainTab", { "annotation": { "scheme": "java+class" } }, "mainTab" ],
+        [ "mainTab", "extends", "PApplet" ],
+        [ "globalVar", { "annotation": { "scheme": "java+field" } }, "globalVar" ],
+        [ "mainTab", "contains", "globalVar" ],
+        [ "otherClass", { "annotation": { "scheme": "java+class" } }, "otherClass" ],
+        [ "otherClass", "accessesField", "globalVar" ]
+      ],
+      "children": [
+        { 
+          "verdict": "neutral",
+          "pattern": [
+            [ "globalVar", { "annotation": { "modifier": "final" } }, "globalVar" ]
+          ] 
+        }
+      ]
+    }
+  ]
+}

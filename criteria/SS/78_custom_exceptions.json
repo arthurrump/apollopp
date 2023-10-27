@@ -1,0 +1,22 @@
+{
+  "criterion": "Custom exceptions are defined where appropriate and no equivalent predefined exceptions exist.",
+  "patterns": [
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "Exception", { "annotation": { "location": "java+class:///java/lang/Exception" } }, "Exception" ],
+        [ "customException", { "annotation": { "scheme": "java+class" } }, "customException" ],
+        [ "customException", "extends", "Exception" ]
+      ]
+    },
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "Exception", { "annotation": { "location": "java+class:///java/lang/Exception" } }, "Exception" ],
+        [ "Exception'", "extends", "Exception" ],
+        [ "customException", { "annotation": { "scheme": "java+class" } }, "customException" ],
+        [ "customException", "extends", "Exception'" ]
+      ]
+    }
+  ]
+}

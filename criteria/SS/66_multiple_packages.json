@@ -1,0 +1,19 @@
+{
+  "criterion": "There is more than one component (package).",
+  "patterns": [
+    {
+      "verdict": "negative",
+      "pattern": [
+        [ "package", { "annotation": { "scheme": "java+package" } }, "package" ]
+      ],
+      "children": [
+        {
+          "verdict": "neutral",
+          "pattern": [
+            [ "otherPackage", { "annotation": { "scheme": "java+package" } }, "otherPackage" ]
+          ]
+        }
+      ]
+    }
+  ]
+}

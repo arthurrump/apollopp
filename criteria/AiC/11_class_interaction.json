@@ -1,0 +1,23 @@
+{
+  "criterion": "How much interaction is between the classes.",
+  "patterns": [
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "class1", { "annotation": { "scheme": "java+class" } }, "class1" ],
+        [ "class2", { "annotation": { "scheme": "java+class" } }, "class2" ],
+        [ "method2", { "annotation": { "scheme": "java+method" } }, "method2" ],
+        [ "class1", "invokes", "method2" ]
+      ],
+      "children": [
+        {
+          "verdict": "neutral",
+          "pattern": [
+            [ "PApplet", { "annotation": { "location": "java+class:///processing/core/PApplet" } }, "PApplet" ],
+            [ "class1", "extends", "PApplet" ]
+          ]
+        }
+      ]
+    }
+  ]
+}

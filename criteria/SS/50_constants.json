@@ -1,0 +1,12 @@
+{
+  "criterion": "Constants are used where appropriate.",
+  "patterns": [
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "field", { "annotation": { "scheme": "java+field" } }, "field" ],
+        [ "field", { "annotation": { "modifier": "final" } }, "field" ]
+      ]
+    }
+  ]
+}

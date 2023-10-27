@@ -1,0 +1,29 @@
+{
+  "criterion": "Interfaces are applied where appropriate to ensure low coupling between components.",
+  "patterns": [
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "interface", { "annotation": { "scheme": "java+interface" } }, "interface" ],
+        [ "class", { "annotation": { "scheme": "java+class" } }, "class" ],
+        [ "class", "implements", "interface" ]
+      ],
+      "children": [
+        {
+          "verdict": "negative",
+          "pattern": [
+            [ "field", { "annotation": { "scheme": "java+field" } }, "field" ],
+            [ "field", "dependsOn", "class" ]
+          ]
+        },
+        {
+          "verdict": "negative",
+          "pattern": [
+            [ "param", { "annotation": { "scheme": "java+parameter" } }, "param" ],
+            [ "param", "dependsOn", "class" ]
+          ]
+        }
+      ]
+    }
+  ]
+}

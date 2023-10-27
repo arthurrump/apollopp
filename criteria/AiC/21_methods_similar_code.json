@@ -1,0 +1,15 @@
+{
+  "criterion": "Use functions when you have similar code.",
+  "patterns": [
+    {
+      "verdict": "positive",
+      "pattern": [
+        [ "reusedMethod", { "annotation": { "scheme": "java+method" } }, "reusedMethod" ],
+        [ "caller1", "invokes", "reusedMethod" ],
+        [ "caller1", { "annotation": { "scheme": "java+method" } }, "caller1" ],
+        [ "caller2", "invokes", "reusedMethod" ],
+        [ "caller2", { "annotation": { "scheme": "java+method" } }, "caller2" ]
+      ]
+    }
+  ]
+}

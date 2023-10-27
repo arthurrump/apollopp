@@ -1,0 +1,23 @@
+{
+  "criterion": "Classes do not access the state of other classes directly.",
+  "patterns": [
+    {
+      "verdict": "negative",
+      "pattern": [
+        [ "otherClass", { "annotation": { "scheme": "java+class" } }, "otherClass" ],
+        [ "otherClass", "contains", "otherClassField" ],
+        [ "otherClassField", { "annotation": { "scheme": "java+field" } }, "otherClassField" ],
+        [ "class", { "annotation": { "scheme": "java+class" } }, "class" ],
+        [ "class", "accessesField", "otherClassField" ]
+      ],
+      "children": [
+        {
+          "verdict": "neutral",
+          "pattern": [
+            [ "otherClassField", { "annotation": { "modifier": "final" } }, "otherClassField" ]
+          ]
+        }
+      ]
+    }
+  ]
+}

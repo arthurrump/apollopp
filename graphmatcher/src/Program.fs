@@ -10,6 +10,7 @@ open Polly
 open QueryBuilder
 open System
 open System.Collections.Generic
+open System.Diagnostics
 open System.IO
 open System.Reactive.Linq
 open System.Threading.Tasks
@@ -216,7 +217,7 @@ type UniqueAsyncQueue<'t>() =
                 requestQueue.Enqueue tcs
                 tcs.Task
 
-let watchCriteria (run: Criterion<Query<string, TypeGraphEdge>> -> Task<unit>) (criteriaDir: string) =
+let watchCriteria (time: bool) (run: Criterion<Query<string, TypeGraphEdge>> -> Task<unit>) (criteriaDir: string) =
     task {
         use watcher = new FileSystemWatcher(criteriaDir)
         watcher.IncludeSubdirectories <- true
@@ -236,17 +237,23 @@ let watchCriteria (run: Criterion<Query<string, TypeGraphEdge>> -> Task<unit>) (
 
         watcher.EnableRaisingEvents <- true
 
+        let stopwatch = Stopwatch()
+
         while true do
             let! file = fileQueue.DequeueAsync()
             printfn ""
             printfn "%s> %s" (DateTime.Now.ToShortTimeString()) file
             try
+                stopwatch.Restart()
                 match! makeCriterion file with
                 | Ok criterion ->
                     do! run criterion
                 | Error err ->
                     printfn "Error loading criterion: %s" err
+                stopwatch.Stop()
+                if time then printfn "-> Done in %dms" stopwatch.ElapsedMilliseconds
             with err ->
+                stopwatch.Stop()
                 printfn "Error running criterion: %s" err.Message
     }
 
@@ -333,6 +340,7 @@ type Args =
     | [<Inherit; Unique>] Graph_Path of path: string
     | [<Inherit; Unique>] Skip of n: int
     | [<Inherit; Unique>] Limit of n: int
+    | [<Inherit; Unique>] Time
 
     interface IArgParserTemplate with
         member this.Usage =
@@ -344,6 +352,7 @@ type Args =
             | Graph_Path _ -> "Path to the directory within a project containing JSON graph files, defaults to source/graph"
             | Skip _ -> "Skip the first n targets"
             | Limit _ -> "Limit the number of targets to n"
+            | Time -> "Time the duration of operations and report the results"
 
 [<EntryPoint>]
 let main args =
@@ -389,17 +398,29 @@ let main args =
                     }
                 
                 printfn "Start watching %s." criteriaDir
-                do! watchCriteria run criteriaDir
+                do! watchCriteria (args.Contains <@ Time @>) run criteriaDir
             }
             0
         | Some (Run runArgs) ->
             Task.wait <| task {
+                let stopwatch = Stopwatch()
+
+                let printDone () =
+                    stopwatch.Stop()
+                    if args.Contains <@ Time @>
+                    then printfn "Done. Took %dms" stopwatch.ElapsedMilliseconds
+                    else printfn "Done."
+
                 printf "Reading targets... "
+                stopwatch.Start()
                 let! targets = makeTargets graphPath skip limit targetsDir
-                printfn "Done."
+                printDone ()
+
                 printf "Reading criteria... "
+                stopwatch.Restart()
                 let! criteria = makeCriteria criteriaDir
-                printfn "Done."
+                printDone ()
+
                 let getWriter: string -> TextWriter * (unit -> unit) =
                     match runArgs.TryGetResult <@ RunArgs.Output @> with
                     | Some outputDir ->
@@ -413,6 +434,11 @@ let main args =
                             printfn ""
                             printfn "# %s" targetId
                             Console.Out, fun () -> ()
+                
+                if args.Contains <@ Time @>
+                then printf "Assessing %d projects on %d criteria... " targets.Length criteria.Length
+                else printf "Asesssing projects... "
+                stopwatch.Restart()
                 let! results = runAll targets criteria
                 for targets, results in results do
                     let writer, dispose = getWriter targets.Id
@@ -420,6 +446,7 @@ let main args =
                         do! writeTargetResults targets results 0 writer
                     finally
                         dispose ()
+                printDone ()
             }
             0
         | Some _ | None ->

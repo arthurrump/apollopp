@@ -8,3 +8,5 @@ This repository contains prototypes for parts of Apollo++, a tool for automated 
 - [*suggest_llm*](suggest_llm/README.md): commandline tool based on [TypeChat](https://microsoft.github.io/TypeChat/) to get suggestions from ChatGPT for patterns based on asssessment criteria.
 
 The folder *[criteria](criteria/README.md)* contains the patterns for some of the assessment criteria for the courses we considered in the research.
+
+The main assessment pipeline requires [Python](https://www.python.org/) (and [Processing](https://processing.org/), if applicable) for the preprocessing, [Rascal](https://www.rascal-mpl.org/) for the graph extraction and [.NET](https://dotnet.microsoft.com/) for the graph matching. A [Nix](https://nixos.org/) Flake is available that configures everything correctly: `nix develop`.

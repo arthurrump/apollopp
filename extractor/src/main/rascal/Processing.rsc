@@ -2,15 +2,17 @@ module Processing
 
 import IO;
 import Set;
+import String;
 import lang::java::m3::Core;
 import graphs::TypeGraph;
 import graphs::Convert;
 import util::FileSystem;
+import util::SystemAPI;
 import lang::json::IO;
 
 list[loc] processingClassPath = 
-    [ |file://D:/Program%20Files%20(portable)/processing-4.2/core/library/core.jar| ]
-    + toList(find(|file://D:/Arthur/Documents/Processing/libraries|, "jar"));
+    [ toLocation(getSystemEnvironment()["PROCESSING_CORELIB"]) ]
+    + toList(find(toLocation(getSystemEnvironment()["PROCESSING_LIBRARIES"]), "jar"));
 
 rel[&T, &T] relid(set[&T] s) = { <x, x> | x <- s };
 

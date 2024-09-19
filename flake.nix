@@ -34,6 +34,12 @@
             # For running the graphmatcher
             dotnet-sdk_8
           ];
+
+          # Environment variables
+          # The Processing core library is included in the package
+          PROCESSING_CORELIB = "${pkgs.processing}/share/processing/core/library/core.jar";
+          # Additionally installed libraries are in this path by default on Linux
+          PROCESSING_LIBRARIES = "~/sketchbook/libraries";
         };
       };
       flake = {

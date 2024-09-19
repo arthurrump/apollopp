@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import sys
 
 from os import path
@@ -75,6 +76,9 @@ for subm in os.listdir(submissionsRoot):
                         shutil.move(path.join(pdeRoot, item), path.join(newPdeRoot, item))
                 pdeRoot = newPdeRoot
 
-        os.spawnl(os.P_WAIT, "D:\\Program Files (portable)\\processing-4.2\\processing-java.exe", "%s", "--sketch=\"" + path.abspath(pdeRoot) + "\"", "--output=\"" + path.abspath(path.join(submissionsRoot, subm, "build")) + "\"", "--force", "--build")
+        buildProc = subprocess.run(["processing-java", "--sketch=" + path.abspath(pdeRoot), "--output=" + path.abspath(path.join(submissionsRoot, subm, "build")), "--force", "--build"], capture_output = True, text = True)
+        print(f"processing-java exited with code {buildProc.returncode} for project {subm}")
+        print(buildProc.stderr)
+        print(buildProc.stdout)
     else:
         print(f"Invalid Processing project {subm}, unable to find .pde root")

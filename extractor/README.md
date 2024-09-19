@@ -9,11 +9,21 @@ For Processing projects: ensure that the Processing code is already converted to
 - `PROCESSING_CORELIB` with the path to Processing's *core/library/core.jar* library, usually located in the directory where Processing is installed, and
 - `PROCESSING_LIBRARIES` with the folder where libraries added in the Processing IDE are installed. This likely is *~/sketchbook/libraries* on Linux and *Documents\Processing\libraries* on Windows. 
 
-When using `nix develop`, these variables are set automatically. Then load the `Processing` module in a Rascal REPL.
+When using `nix develop`, these variables are set automatically. Finally, call the `Processing` module in Rascal like so:
 
-For Java projects: ensure that all dependencies are available as .jar files in the project folder and load the `Java` module in a Rascal REPL.
+```
+rascal Processing file:///absolute/path/to/projects/directory
+```
 
-Finally, for both Processing and Java, call `writeProjectTypeGraphs` with the absolute path to a folder containing project folders. The TypeGraph JSON files will be written to *source/graph/typegraph.json* in the project folder.
+For Java projects: ensure that all dependencies are available as .jar files in the project folder and call the `Java` module:
+
+```
+rascal Java file:///absolute/path/to/projects/directory
+```
+
+In both cases, the TypeGraph JSON files will be written to *source/graph/typegraph.json* in the project folder.
+
+Alternatively, you may also load either module in the Rascal REPL and call `writeProjectTypeGraphs` with the absolute path to a folder containing project folders. 
 
 ## Technical details
 

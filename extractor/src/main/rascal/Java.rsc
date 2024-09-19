@@ -26,3 +26,13 @@ void writeProjectTypeGraphs(loc dir) {
         writeJSON(proj + "source" + "graph" + "typegraph.json", typeGraph);
     }
 }
+
+int main(list[str] params) {
+    if (size(params) != 1) {
+        println("USAGE: Java \<path to projects dir\>");
+        return 1;
+    }
+
+    writeProjectTypeGraphs(toLocation(params[0]));
+    return 0;
+}

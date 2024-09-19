@@ -1,6 +1,7 @@
 module Processing
 
 import IO;
+import List;
 import Set;
 import String;
 import lang::java::m3::Core;
@@ -25,6 +26,7 @@ TypeGraph[loc] createTypeGraph(M3 model) {
 }
 
 list[loc] getProjects(loc dir) {
+    println(dir);
     return [ proj + "source" | proj <- dir.ls ];
 }
 
@@ -48,4 +50,14 @@ void writeProjectTypeGraphs(loc dir) {
         typeGraph = createTypeGraph(model);
         writeJSON(proj + "graph" + "typegraph.json", typeGraph);
     }
+}
+
+int main(list[str] params) {
+    if (size(params) != 1) {
+        println("USAGE: Processing \<path to projects dir\>");
+        return 1;
+    }
+
+    writeProjectTypeGraphs(toLocation(params[0]));
+    return 0;
 }

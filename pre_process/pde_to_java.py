@@ -58,6 +58,8 @@ for subm in os.listdir(submissionsRoot):
                 pdeRoot = newPdeRoot
             else:
                 print(f"Invalid Processing project {subm}, unable to detect main file")
+                print("Deleting project.")
+                shutil.rmtree(path.join(submissionsRoot, subm))
                 continue
         else:
             sketchName = path.basename(pdeRoot)
@@ -77,8 +79,12 @@ for subm in os.listdir(submissionsRoot):
                 pdeRoot = newPdeRoot
 
         buildProc = subprocess.run(["processing-java", "--sketch=" + path.abspath(pdeRoot), "--output=" + path.abspath(path.join(submissionsRoot, subm, "build")), "--force", "--build"], capture_output = True, text = True)
-        print(f"processing-java exited with code {buildProc.returncode} for project {subm}")
-        print(buildProc.stderr)
-        print(buildProc.stdout)
+        print(buildProc.stderr, end = None)
+        print(buildProc.stdout, end = None)
+        if buildProc.returncode != 0:
+            print("processing-java failed. Deleting project.")
+            shutil.rmtree(path.join(submissionsRoot, subm))
     else:
         print(f"Invalid Processing project {subm}, unable to find .pde root")
+        print("Deleting project.")
+        shutil.rmtree(path.join(submissionsRoot, subm))

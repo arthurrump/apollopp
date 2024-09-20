@@ -453,5 +453,6 @@ let main args =
             printfn "%s" (argParser.PrintUsage(message = "Please specify a subcommand"))
             1
     with e ->
-        printfn "%s" e.Message
+        printfn "Exception: %s" e.Message
+        printfn "%s" e.StackTrace
         1

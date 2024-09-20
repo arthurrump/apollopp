@@ -50,7 +50,11 @@ let makeTarget (id: string) typegraphFile =
         let! json = File.ReadAllTextAsync typegraphFile
         return 
             Decode.fromString (TypeGraph.decode Decode.string) json
-            |> Result.map (Target.fromGraph id)
+            |> Result.bind (fun graph -> 
+                if Set.isEmpty graph
+                then Error "Cannot build Target from an empty graph"
+                else Ok (Target.fromGraph id graph)
+            )
     }
 
 let makeTargets (graphPath: string) (skip: int option) (limit: int option) (targetsDir: string) =

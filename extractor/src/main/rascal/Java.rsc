@@ -1,7 +1,9 @@
 module Java
 
 import IO;
+import List;
 import Set;
+import String;
 import lang::java::m3::Core;
 import lang::json::IO;
 import graphs::TypeGraph;

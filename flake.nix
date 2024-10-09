@@ -29,6 +29,7 @@
             # For translating Processing projects
             processing
             # For running the extractors
+            jdk17
             maven
             rascal
             # For running the graphmatcher
